@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>pytradeAI — MT5 Dashboard</title>
+    <meta name="description" content="AI-powered automated trading system connected to MetaTrader 5 with real-time browser dashboard.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <!-- ═══ Header ═══════════════════════════════════════════ -->
+    <header class="header" id="header">
+        <div class="header-left">
+            <span class="header-icon">🤖</span>
+            <h1 class="header-title">pytradeAI</h1>
+        </div>
+        <div class="header-right">
+            <div class="badge badge-mt5" id="badge-mt5">
+                <span class="badge-dot"></span>
+                <span>MT5 Online</span>
+            </div>
+            <button class="btn-system" id="btn-system" onclick="toggleSystem()">
+                <span class="btn-system-icon">⏻</span>
+                <span id="btn-system-text">SYSTEM ON</span>
+            </button>
+        </div>
+    </header>
+
+    <div class="divider"></div>
+
+    <!-- ═══ Top Row: Account, Win Rate, Strategies ═══════════ -->
+    <section class="top-row">
+        <!-- Account Balance -->
+        <div class="card card-balance" id="card-balance">
+            <div class="card-icon">💼</div>
+            <div class="card-label">ACCOUNT BALANCE</div>
+            <div class="card-value" id="account-balance">$0.00</div>
+        </div>
+
+        <!-- Win Rate -->
+        <div class="card card-winrate" id="card-winrate">
+            <div class="card-icon">📊</div>
+            <div class="card-label">WIN RATE (30 DAYS)</div>
+            <div class="card-value" id="win-rate">0%</div>
+        </div>
+
+        <!-- Active Strategies -->
+        <div class="card card-strategies" id="card-strategies">
+            <div class="card-header-inline">
+                <span class="card-header-icon">⚙️</span>
+                <span class="card-header-text">ACTIVE STRATEGIES</span>
+            </div>
+            <div class="strategies-grid" id="strategies-grid">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ R&D Insights ═════════════════════════════════════ -->
+    <section class="insights-section" id="insights-section">
+        <div class="insights-header">
+            <div class="insights-title">
+                <span class="insights-icon">🧬</span>
+                <span>Research & Development (AI Insights)</span>
+            </div>
+            <button class="btn-retrain" id="btn-retrain" onclick="openRetrain()">
+                <span>🔄</span> Retrain AI Models
+            </button>
+        </div>
+        <div class="insights-cards">
+            <div class="insight-card insight-most-lost">
+                <div class="insight-label">Most Lost Symbol</div>
+                <div class="insight-value" id="most-lost-symbol">None!</div>
+            </div>
+            <div class="insight-card insight-weakest">
+                <div class="insight-label">Weakest Action</div>
+                <div class="insight-value" id="weakest-action">Perfect</div>
+            </div>
+            <div class="insight-card insight-loss-impact">
+                <div class="insight-label">Total Loss Impact</div>
+                <div class="insight-value" id="total-loss-impact">$0.00</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ Live Open Positions ══════════════════════════════ -->
+    <section class="positions-section" id="positions-section">
+        <div class="positions-header">
+            <div class="positions-title">
+                <span class="positions-icon">⚡</span>
+                <span>Live Open Positions</span>
+            </div>
+            <div class="positions-update-text" id="update-timer">Updates every 2 seconds</div>
+        </div>
+        <div class="positions-table-wrapper">
+            <table class="positions-table" id="positions-table">
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Action</th>
+                        <th>Lot Size</th>
+                        <th>Open Price</th>
+                        <th>Current Price</th>
+                        <th>Floating P&L</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="positions-body">
+                </tbody>
+            </table>
+            <div class="no-positions" id="no-positions">
+                <div class="no-positions-icon">🍔</div>
+                <div>No active positions</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ Retrain Modal ════════════════════════════════════ -->
+    <div class="modal-overlay" id="retrain-modal" onclick="closeRetrain(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2>🧠 AI Retrain Suggestions</h2>
+                <button class="modal-close" onclick="closeRetrain()">✕</button>
+            </div>
+            <div class="modal-body" id="retrain-body">
+                <div class="loading-spinner"></div>
+                <p>Analyzing performance data...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Rankings Modal ═══════════════════════════════════ -->
+    <div class="modal-overlay" id="rankings-modal" onclick="closeRankings(event)">
+        <div class="modal-content modal-wide" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h2>📊 Symbol Rankings</h2>
+                <button class="modal-close" onclick="closeRankings()">✕</button>
+            </div>
+            <div class="modal-body" id="rankings-body">
+                <div class="loading-spinner"></div>
+                <p>Analyzing symbols...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Toast Notifications ══════════════════════════════ -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
