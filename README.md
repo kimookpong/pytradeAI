@@ -22,6 +22,10 @@
   <a href="#deployment">Deployment</a>
 </p>
 
+<p align="center">
+  <img src="screenshot.png" alt="pytradeAI Dashboard" width="900" />
+</p>
+
 ---
 
 ## Features
