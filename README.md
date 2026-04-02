@@ -30,15 +30,15 @@
 
 ## Features
 
-| Feature | Description |
-|---------|-------------|
-| ⚡ **Auto-Trade** | Runs automated strategies on MT5 24/7 with RSI, Moving Averages & Bollinger Bands |
-| 🧠 **Smart Logic** | Screens and ranks currency pairs & gold by volatility, trend strength, and spread cost |
-| 🧬 **AI Insights** | Real-time analysis of strengths, weaknesses, most-lost symbols & weakest actions |
-| 📊 **Live Dashboard** | Premium dark-themed browser UI with WebSocket updates every 2 seconds |
-| 🔄 **Multi-Symbol** | Supports BTCUSD, XAUUSD (Gold), USDJPY, ETHUSD, EURUSD, GBPUSD |
-| 🛡️ **Risk Management** | Configurable stop-loss, take-profit, and max position sizing per strategy |
-| 🧪 **Simulation Mode** | Full demo mode for development & testing without MT5 (works on macOS/Linux) |
+| Feature                | Description                                                                            |
+| ---------------------- | -------------------------------------------------------------------------------------- |
+| ⚡ **Auto-Trade**      | Runs automated strategies on MT5 24/7 with RSI, Moving Averages & Bollinger Bands      |
+| 🧠 **Smart Logic**     | Screens and ranks currency pairs & gold by volatility, trend strength, and spread cost |
+| 🧬 **AI Insights**     | Real-time analysis of strengths, weaknesses, most-lost symbols & weakest actions       |
+| 📊 **Live Dashboard**  | Premium dark-themed browser UI with WebSocket updates every 2 seconds                  |
+| 🔄 **Multi-Symbol**    | Supports BTCUSD, XAUUSD (Gold), USDJPY, ETHUSD, EURUSD, GBPUSD                         |
+| 🛡️ **Risk Management** | Configurable stop-loss, take-profit, and max position sizing per strategy              |
+| 🧪 **Simulation Mode** | Full demo mode for development & testing without MT5 (works on macOS/Linux)            |
 
 ---
 
@@ -46,31 +46,31 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Browser Dashboard                         │
-│              (HTML / CSS / JavaScript)                        │
-│                                                              │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐ │
-│   │ Account  │  │ Win Rate │  │Strategies│  │  Positions  │ │
-│   │ Balance  │  │ (30 Day) │  │  ON/OFF  │  │   Table     │ │
-│   └──────────┘  └──────────┘  └──────────┘  └────────────┘ │
+│                    Browser Dashboard                        │
+│              (HTML / CSS / JavaScript)                      │
+│                                                             │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐  │
+│   │ Account  │  │ Win Rate │  │Strategies│  │  Positions │  │
+│   │ Balance  │  │ (30 Day) │  │  ON/OFF  │  │   Table    │  │
+│   └──────────┘  └──────────┘  └──────────┘  └────────────┘  │
 └─────────────────────┬───────────────────────────────────────┘
                       │ WebSocket + REST API
 ┌─────────────────────▼───────────────────────────────────────┐
-│                  FastAPI Server (:8888)                       │
-│                                                              │
+│                  FastAPI Server (:8888)                     │
+│                                                             │
 │   ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│   │ MT5 Connector│  │Trading Engine│  │   Smart Logic     │  │
-│   │  (+ Sim Mode)│  │ (Auto-Trade) │  │ (Symbol Ranking)  │  │
+│   │ MT5 Connector│  │Trading Engine│  │   Smart Logic    │  │
+│   │  (+ Sim Mode)│  │ (Auto-Trade) │  │ (Symbol Ranking) │  │
 │   └──────┬───────┘  └──────────────┘  └──────────────────┘  │
-│          │           ┌──────────────┐                        │
-│          │           │  AI Insights │                        │
-│          │           │  (R&D / Perf)│                        │
-│          │           └──────────────┘                        │
+│          │           ┌──────────────┐                       │
+│          │           │  AI Insights │                       │
+│          │           │  (R&D / Perf)│                       │
+│          │           └──────────────┘                       │
 └──────────┼──────────────────────────────────────────────────┘
            │
-┌──────────▼──────────┐
+┌──────────▼──────────┐ห
 │   MetaTrader 5      │
-│   Terminal (Windows) │
+│   Terminal (Windows)│
 └─────────────────────┘
 ```
 
@@ -81,7 +81,7 @@
 ### Prerequisites
 
 - Python 3.9+
-- MetaTrader 5 terminal *(Windows only, optional — simulation mode available)*
+- MetaTrader 5 terminal _(Windows only, optional — simulation mode available)_
 
 ### Installation
 
@@ -122,13 +122,13 @@ The dashboard provides a real-time view of your trading system:
 
 ### Controls
 
-| Action | Method |
-|--------|--------|
+| Action               | Method                                          |
+| -------------------- | ----------------------------------------------- |
 | Toggle System ON/OFF | Click **SYSTEM ON/OFF** button or press `Space` |
-| Toggle Strategy | Click any strategy in the grid |
-| Close Position | Click **Close** button on position row |
-| Retrain AI | Click **Retrain AI Models** button |
-| Close Modals | Press `Escape` |
+| Toggle Strategy      | Click any strategy in the grid                  |
+| Close Position       | Click **Close** button on position row          |
+| Retrain AI           | Click **Retrain AI Models** button              |
+| Close Modals         | Press `Escape`                                  |
 
 ---
 
@@ -155,18 +155,18 @@ mt5-bot/
 
 ### REST Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/account` | Account balance, equity, margin |
-| `GET` | `/api/positions` | Open positions list |
-| `GET` | `/api/history?days=30` | Closed trade history |
-| `GET` | `/api/strategies` | All strategies with status |
-| `GET` | `/api/status` | System status overview |
-| `POST` | `/api/system/toggle` | Toggle system ON/OFF |
-| `POST` | `/api/strategy/toggle/{symbol}` | Toggle strategy for symbol |
-| `GET` | `/api/insights?days=30` | AI performance insights |
-| `GET` | `/api/insights/retrain` | Retrain suggestions |
-| `GET` | `/api/rankings` | Symbol advantage rankings |
+| Method | Endpoint                        | Description                     |
+| ------ | ------------------------------- | ------------------------------- |
+| `GET`  | `/api/account`                  | Account balance, equity, margin |
+| `GET`  | `/api/positions`                | Open positions list             |
+| `GET`  | `/api/history?days=30`          | Closed trade history            |
+| `GET`  | `/api/strategies`               | All strategies with status      |
+| `GET`  | `/api/status`                   | System status overview          |
+| `POST` | `/api/system/toggle`            | Toggle system ON/OFF            |
+| `POST` | `/api/strategy/toggle/{symbol}` | Toggle strategy for symbol      |
+| `GET`  | `/api/insights?days=30`         | AI performance insights         |
+| `GET`  | `/api/insights/retrain`         | Retrain suggestions             |
+| `GET`  | `/api/rankings`                 | Symbol advantage rankings       |
 
 ### WebSocket
 
@@ -199,10 +199,10 @@ Connect to `ws://localhost:8888/ws` for real-time data streaming.
 
 Each symbol runs an independent strategy combining three indicators:
 
-| Indicator | Signal | Weight |
-|-----------|--------|--------|
-| **RSI (14)** | RSI < 30 = BUY, RSI > 70 = SELL | 2 points |
-| **MA Crossover** | Fast MA (7) > Slow MA (20) = BUY | 1 point |
+| Indicator           | Signal                                   | Weight   |
+| ------------------- | ---------------------------------------- | -------- |
+| **RSI (14)**        | RSI < 30 = BUY, RSI > 70 = SELL          | 2 points |
+| **MA Crossover**    | Fast MA (7) > Slow MA (20) = BUY         | 1 point  |
 | **Bollinger Bands** | Price ≤ Lower Band = BUY, ≥ Upper = SELL | 2 points |
 
 A trade is executed when **BUY signals ≥ 3** or **SELL signals ≥ 3**, with the opposite direction scoring below 2.
@@ -271,14 +271,14 @@ STRATEGIES = {
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Backend | Python 3.9+, FastAPI, Uvicorn |
-| Frontend | HTML5, CSS3 (custom dark theme), Vanilla JavaScript |
-| Real-time | WebSocket (native) |
-| Data | Pandas, NumPy |
-| Trading | MetaTrader5 Python API |
-| Font | [Inter](https://fonts.google.com/specimen/Inter) (Google Fonts) |
+| Layer     | Technology                                                      |
+| --------- | --------------------------------------------------------------- |
+| Backend   | Python 3.9+, FastAPI, Uvicorn                                   |
+| Frontend  | HTML5, CSS3 (custom dark theme), Vanilla JavaScript             |
+| Real-time | WebSocket (native)                                              |
+| Data      | Pandas, NumPy                                                   |
+| Trading   | MetaTrader5 Python API                                          |
+| Font      | [Inter](https://fonts.google.com/specimen/Inter) (Google Fonts) |
 
 ---
 
