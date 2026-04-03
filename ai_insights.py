@@ -38,7 +38,7 @@ class AIInsights:
             sym = deal["symbol"]
             symbol_stats[sym]["trades"] += 1
             symbol_stats[sym]["total_pnl"] += deal["profit"]
-            if deal["profit"] >= 0:
+            if deal["profit"] > 0:
                 symbol_stats[sym]["wins"] += 1
             else:
                 symbol_stats[sym]["losses"] += 1
@@ -69,7 +69,7 @@ class AIInsights:
             action = deal["type"]
             if action in action_stats:
                 action_stats[action]["total_pnl"] += deal["profit"]
-                if deal["profit"] >= 0:
+                if deal["profit"] > 0:
                     action_stats[action]["wins"] += 1
                 else:
                     action_stats[action]["losses"] += 1
@@ -87,8 +87,8 @@ class AIInsights:
 
         # ─── Overall Stats ─────────────────────────────────
         total_trades = len(history)
-        wins = sum(1 for d in history if d["profit"] >= 0)
-        losses = sum(1 for d in history if d["profit"] < 0)
+        wins = sum(1 for d in history if d["profit"] > 0)
+        losses = sum(1 for d in history if d["profit"] <= 0)
         win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
         total_loss = sum(d["profit"] for d in history if d["profit"] < 0)
         total_profit_all = sum(d["profit"] for d in history)
@@ -98,10 +98,10 @@ class AIInsights:
         streak_count = 0
         sorted_history = sorted(history, key=lambda x: x["time"], reverse=True)
         if sorted_history:
-            first_result = "win" if sorted_history[0]["profit"] >= 0 else "loss"
+            first_result = "win" if sorted_history[0]["profit"] > 0 else "loss"
             streak_type = first_result
             for deal in sorted_history:
-                result = "win" if deal["profit"] >= 0 else "loss"
+                result = "win" if deal["profit"] > 0 else "loss"
                 if result == first_result:
                     streak_count += 1
                 else:

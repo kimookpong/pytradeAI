@@ -1,0 +1,20 @@
+# Python Environments & Cache
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Security & Credentials (ห้าม Commit เด็ดขาด)
+ai_settings.json
+mt5_accounts.json
+.env
+
+# Logs & Temporary Files
+*.log
+*.sqlite3-journal
+
+# OS Generated Files
+.DS_Store
+Thumbs.db

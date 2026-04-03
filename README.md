@@ -2,292 +2,94 @@
   <img src="https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" />
   <img src="https://img.shields.io/badge/MetaTrader5-4A90D9?style=for-the-badge&logo=metatrader5&logoColor=white" />
-  <img src="https://img.shields.io/badge/WebSocket-010101?style=for-the-badge&logo=socketdotio&logoColor=white" />
-  <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/AI-MiniMax%20%7C%20Gemini-8B5CF6?style=for-the-badge" />
 </p>
 
 <h1 align="center">🤖 pytradeAI</h1>
 
 <p align="center">
-  <strong>Automated trading system connected to MetaTrader 5 with a real-time browser dashboard.</strong><br>
-  Built with Python · FastAPI · WebSocket · Vanilla JS
-</p>
-
-<p align="center">
-  <a href="#features">Features</a> •
-  <a href="#architecture">Architecture</a> •
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#dashboard">Dashboard</a> •
-  <a href="#api-reference">API</a> •
-  <a href="#deployment">Deployment</a>
-</p>
-
-<p align="center">
-  <img src="screenshot.png" alt="pytradeAI Dashboard" width="900" />
+  <strong>ระบบเทรดอัตโนมัติ (Automated Trading) เชื่อมต่อ MetaTrader 5 พร้อมระบบ AI วิเคราะห์ ทบทวน สร้างกลยุทธ์ และเทรดอัตโนมัติ</strong>
 </p>
 
 ---
 
-## Features
+## 📌 กระบวนการทำงานรวม (Core Process & Concept)
 
-| Feature                | Description                                                                            |
-| ---------------------- | -------------------------------------------------------------------------------------- |
-| ⚡ **Auto-Trade**      | Runs automated strategies on MT5 24/7 with RSI, Moving Averages & Bollinger Bands      |
-| 🧠 **Smart Logic**     | Screens and ranks currency pairs & gold by volatility, trend strength, and spread cost |
-| 🧬 **AI Insights**     | Real-time analysis of strengths, weaknesses, most-lost symbols & weakest actions       |
-| 📊 **Live Dashboard**  | Premium dark-themed browser UI with WebSocket updates every 2 seconds                  |
-| 🔄 **Multi-Symbol**    | Supports BTCUSD, XAUUSD (Gold), USDJPY, ETHUSD, EURUSD, GBPUSD                         |
-| 🛡️ **Risk Management** | Configurable stop-loss, take-profit, and max position sizing per strategy              |
-| 🧪 **Simulation Mode** | Full demo mode for development & testing without MT5 (works on macOS/Linux)            |
+โปรเจกต์ pytradeAI ถูกออกแบบมาเพื่อให้ทำงานเป็นระบบเทรดอัจฉริยะที่ไม่ได้มีแค่เงื่อนไขตายตัว แต่สามารถเรียนรู้และวิเคราะห์สภาวะตลาดได้ โดยมีหลักการทำงานสำคัญ 3 ส่วนดังนี้:
 
----
+### 1. ระบบ Auto Trade ตาม Strategies เดิม
+กระบวนการพื้นฐานของระบบจะเริ่มจากการ **อิงการ auto trade ตาม strategies ที่เปิดเปิดใช้านไว้** เช่น การตั้งค่า Indicator RSI, Moving Average (MA) และ Bollinger Bands (BB) โดยระบบเทรดยังคงตรวจจับสัญญาณ (Signals) ตลอดเวลา และจะทำการออกออเดอร์ทันทีที่เข้าเงื่อนไขของแต่ละกลยุทธ์ที่ผู้ใช้ยอมรับ
 
-## Architecture
+### 2. กระบวนการประเมินและทบทวนของ AI (AI Analysis & Context Retention)
+เมื่อมีการเทรดผ่านไป AI จะมีหน้าที่เข้าตรวจสอบและ **วิเคราะห์ข้อมูลจากการเทรดที่ผ่านมา (Past Trades)** ว่าเข้าเงื่อนไขแล้วกำไรหรือขาดทุนเพราะเหตุใด:
+- **ปรับปรุง Strategies ใหม่:** AI จะประเมินจังหวะการเข้าออกที่ผิดพลาด เพื่อเสนอแนวทางปรับปรุงค่าพารามิเตอร์ หรือ Strategies ชุดใหม่ให้สอดคล้องกับสภาพตลาด
+- **เก็บข้อมูล Context:** ข้อมูลการวิเคราะห์ สถิติ และเหตุผลเชิงลึกทั้งหมด จะถูกจัดเก็บเป็น Context ไว้ในระบบอย่างเป็นลำดับ
+- **แสดงผลแบบ Real-time:** Context และความเห็นของ AI จะถูกนำมาแสดงผลผ่าน Dashboard (หมวด AI Insights) ให้คุณรับทราบสถานะการเรียนรู้ของระบบอย่างโปร่งใส
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Browser Dashboard                        │
-│              (HTML / CSS / JavaScript)                      │
-│                                                             │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐  │
-│   │ Account  │  │ Win Rate │  │Strategies│  │  Positions │  │
-│   │ Balance  │  │ (30 Day) │  │  ON/OFF  │  │   Table    │  │
-│   └──────────┘  └──────────┘  └──────────┘  └────────────┘  │
-└─────────────────────┬───────────────────────────────────────┘
-                      │ WebSocket + REST API
-┌─────────────────────▼───────────────────────────────────────┐
-│                  FastAPI Server (:8888)                     │
-│                                                             │
-│   ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│   │ MT5 Connector│  │Trading Engine│  │   Smart Logic    │  │
-│   │  (+ Sim Mode)│  │ (Auto-Trade) │  │ (Symbol Ranking) │  │
-│   └──────┬───────┘  └──────────────┘  └──────────────────┘  │
-│          │           ┌──────────────┐                       │
-│          │           │  AI Insights │                       │
-│          │           │  (R&D / Perf)│                       │
-│          │           └──────────────┘                       │
-└──────────┼──────────────────────────────────────────────────┘
-           │
-┌──────────▼──────────┐ห
-│   MetaTrader 5      │
-│   Terminal (Windows)│
-└─────────────────────┘
-```
+### 3. หากให้ AI ลงมือเทรดเอง (AI Auto Trade Enabled)
+ในกรณีที่มีการอนุญาตให้ **"AI trade เองได้"** จะมีกระบวนการแสดงผลที่ชัดเจนขึ้นและไม่ทำงานเป็นกล่องดำ (Black Box):
+- ระบบจะทำการ **ระบุอย่างชัดเจนว่า AI กำลังหยิบ Context หรือปัจจัยตลาดข้อไหนขึ้นมาวิเคราะห์อยู่ในขณะนั้น**
+- ระบุให้เห็นว่า **กำลังใช้ Strategies หรือตรรกะแบบไหนในการเข้าเทรดครั้งนี้**
+- สถานะต่างๆ จำนวนเปอร์เซ็นต์ความมั่นใจความเสี่ยง และเหตุผลในการวางออเดอร์ จะถูก Log และแจ้งผ่านหน้า UI โดยตรง เพื่อให้การเทรดอัตโนมัติโดย AI ตรวจสอบย้อนหลังได้ 100%
 
 ---
 
-## Quick Start
+## 🚀 ฟีเจอร์เด่นอื่นๆ (Additional Features)
 
-### Prerequisites
+- ⚡ **Manual Trade & Dashboard:** ส่งคำสั่งเทรดพร้อมกันผ่านหน้าเว็บ UI มืดแบบ Premium ได้ทันที ข้อมูลและพอร์ตขยับแบบ Real-time ยิงผ่าน WebSocket
+- 🧠 **Smart Logic & Rankings:** จัดอันดับคู่เงิน (Symbols) เช่น XAUUSD, BTCUSD, EURUSD ว่าคู่ไหนน่าลงทุนโดยประเมินจาก Volatility และเปรียบเทียบสเปรด (Spread)
+- 🛡️ **Risk Management:** จำกัด Lot size สูงสุด, มี Max positions กั้นไม่ให้ AI เปิดไม้เยอะเกินเบอร์ พร้อม Stop Loss ครอบคลุมทุกการเทรด
+- 🧪 **Simulation Mode:** มีโหมดจำลองสำหรับนักพัฒนาที่ใช้ macOS / Linux ช่วยให้เขียนโค้ดและดู UI ต่อได้ โดยไม่ต้องรัน MT5 บน Windows
 
-- Python 3.9+
-- MetaTrader 5 terminal _(Windows only, optional — simulation mode available)_
+---
 
-### Installation
+## ⚙️ การติดตั้งและใช้งาน (Quick Start)
+
+### Requirement
+- Python 3.9+ ขึ้นไป
+- โปรแกรม MetaTrader 5 (รันบน Windows), หากไม่มีสามารถรันแบบจำลองบัญชีม๊อคได้
 
 ```bash
-# Clone the repository
+# 1. Clone โปรเจกต์
 git clone https://github.com/your-username/pytradeAI.git
 cd pytradeAI
 
-# Install dependencies
+# 2. สร้าง Virtual Environment
+python -m venv .venv
+
+# 3. เปิดใช้งาน Environment
+# ของระบบ Windows:
+.venv\Scripts\activate
+# ของระบบ Linux/macOS:
+# source .venv/bin/activate
+
+# 4. ติดตั้ง Libraries
 pip install -r requirements.txt
 
-# Start the server
-python server.py
+# 5. รันเซิร์ฟเวอร์
+python -m uvicorn server:app --host 0.0.0.0 --port 8888 --reload
 ```
-
-### Open Dashboard
-
-Navigate to **http://localhost:8888** in your browser.
-
-> **Note:** On macOS/Linux, the system runs in **Simulation Mode** with realistic demo data. On Windows with MT5 installed, it connects to the live terminal automatically.
+เปิดเบราว์เซอร์ไปที่: `http://localhost:8888` เพื่อใช้งาน Dashboard
 
 ---
 
-## Dashboard
+## 🔒 หลักการ Push Git (ความปลอดภัยและการข้ามไฟล์)
 
-### Overview
+ในการทำงานกับระบบที่มีการเชื่อมต่อพอร์ตการเงินแท้ ทักษะด้าน **Git Security** สำคัญที่สุด มีโครงสร้างข้อมูลหลายแบบที่มีลักษณะเฉพาะ **ไม่จำเป็นและไม่ควรต้องนำขึ้นไป Commit** บน Git เด็ดขาด ดังนี้:
 
-The dashboard provides a real-time view of your trading system:
+### ❌ ข้อมูลอะไรบ้างที่ไม่ควร Commit ?
 
-- **Account Balance** — Live balance with P&L tracking
-- **Win Rate (30 Days)** — Overall strategy performance
-- **Active Strategies** — Toggle individual symbols ON/OFF
-- **R&D Insights** — AI-powered weakness detection
-  - Most Lost Symbol
-  - Weakest Action (BUY vs SELL)
-  - Total Loss Impact
-- **Live Open Positions** — Real-time floating P&L with close buttons
+1. **ข้อมูล Credentials การลงทุนของคุณ**
+   - ไฟล์ **`mt5_accounts.json`**: ถูกระบบสร้างขึ้นเพื่อเก็บเลข Account, ทูลและ Password สำหรับแวะเข้าเซิร์ฟเวอร์ Exness หรือ Broker ต่างๆ
+   - ไฟล์ **`ai_settings.json`** / **`.env`**: ใช้เก็บรหัส API Keys พิเศษเช่นของ Gemini, MiniMax ที่ผูกบัตรเครดิต
+   *(หากไฟล์นี้ติดไปกับ Git และหลุดสู่สาธารณะ อาจส่งผลให้โดนขโมยพอร์ต หรือถูกดึง API Key ไปใช้จนเสียเงินได้)*
 
-### Controls
+2. **ไฟล์ Environment ที่หนักเครื่อง**
+   - โฟลเดอร์ **`.venv/`** หรือ **`env/`**: ชุดของ Python Library มีขนาดใหญ่มาก ๆ แต่ละคนที่โหลดโปรเจกต์ไปสามารถสร้างขึ้นเองในคอมพิวเตอร์เขาได้ผ่าน `requirements.txt`
+   - โฟลเดอร์โฟลเดอร์รอยต่อ **`__pycache__/`** และไฟล์กลุ่ม **`*.pyc`**: ไฟล์ Compiled code ย่อยที่สร้างขึ้นโดย Python ตอนทำงาน ไม่จำเป็นต้อง Commit
 
-| Action               | Method                                          |
-| -------------------- | ----------------------------------------------- |
-| Toggle System ON/OFF | Click **SYSTEM ON/OFF** button or press `Space` |
-| Toggle Strategy      | Click any strategy in the grid                  |
-| Close Position       | Click **Close** button on position row          |
-| Retrain AI           | Click **Retrain AI Models** button              |
-| Close Modals         | Press `Escape`                                  |
+3. **ไฟล์จำพวก Log และ Cache เครื่องส่วนตัว**
+   - รูปภาพหรือประวัติการทำงานชั่วคราว **`*.log`**
+   - ไฟล์ตั้งค่า OS ชั่วคราว เช่น **`.DS_Store`** (จาก macOS)
 
----
-
-## Project Structure
-
-```
-mt5-bot/
-├── server.py              # FastAPI server (REST + WebSocket)
-├── mt5_connector.py       # MT5 connection manager + simulation
-├── trading_engine.py      # Auto-trading strategies (RSI/MA/BB)
-├── smart_logic.py         # Symbol screening & ranking
-├── ai_insights.py         # Performance analytics & suggestions
-├── requirements.txt       # Python dependencies
-├── README.md
-└── static/
-    ├── index.html         # Dashboard HTML
-    ├── styles.css         # Premium dark theme
-    └── app.js             # WebSocket client & UI logic
-```
-
----
-
-## API Reference
-
-### REST Endpoints
-
-| Method | Endpoint                        | Description                     |
-| ------ | ------------------------------- | ------------------------------- |
-| `GET`  | `/api/account`                  | Account balance, equity, margin |
-| `GET`  | `/api/positions`                | Open positions list             |
-| `GET`  | `/api/history?days=30`          | Closed trade history            |
-| `GET`  | `/api/strategies`               | All strategies with status      |
-| `GET`  | `/api/status`                   | System status overview          |
-| `POST` | `/api/system/toggle`            | Toggle system ON/OFF            |
-| `POST` | `/api/strategy/toggle/{symbol}` | Toggle strategy for symbol      |
-| `GET`  | `/api/insights?days=30`         | AI performance insights         |
-| `GET`  | `/api/insights/retrain`         | Retrain suggestions             |
-| `GET`  | `/api/rankings`                 | Symbol advantage rankings       |
-
-### WebSocket
-
-Connect to `ws://localhost:8888/ws` for real-time data streaming.
-
-**Incoming messages** (server → client):
-
-```json
-{
-  "type": "realtime",
-  "timestamp": 1711180800,
-  "account": { "balance": 6040.95, "equity": 6055.20 },
-  "positions": [...],
-  "strategies": [...],
-  "insights": { "win_rate": 67.9, "most_lost_symbol": {...} }
-}
-```
-
-**Outgoing commands** (client → server):
-
-```json
-{ "command": "toggle_system" }
-{ "command": "toggle_strategy", "symbol": "XAUUSD" }
-{ "command": "close_position", "ticket": 100001 }
-```
-
----
-
-## Trading Strategies
-
-Each symbol runs an independent strategy combining three indicators:
-
-| Indicator           | Signal                                   | Weight   |
-| ------------------- | ---------------------------------------- | -------- |
-| **RSI (14)**        | RSI < 30 = BUY, RSI > 70 = SELL          | 2 points |
-| **MA Crossover**    | Fast MA (7) > Slow MA (20) = BUY         | 1 point  |
-| **Bollinger Bands** | Price ≤ Lower Band = BUY, ≥ Upper = SELL | 2 points |
-
-A trade is executed when **BUY signals ≥ 3** or **SELL signals ≥ 3**, with the opposite direction scoring below 2.
-
----
-
-## Deployment
-
-### Option 1: Windows VPS (Recommended)
-
-For 24/7 live trading, deploy on a Windows VPS with MT5 terminal:
-
-```bash
-# On Windows VPS
-pip install -r requirements.txt
-pip install MetaTrader5
-
-# Edit server.py to set MT5 login credentials
-python server.py
-```
-
-Access the dashboard remotely via `http://your-vps-ip:8888`.
-
-### Option 2: Development on macOS/Linux
-
-The system runs in simulation mode automatically — perfect for development, backtesting, and UI iteration.
-
-```bash
-python server.py
-# → Simulation mode activated
-# → Dashboard at http://localhost:8888
-```
-
----
-
-## Configuration
-
-### MT5 Connection
-
-To connect to a live MT5 account, modify the `connector.connect()` call in `server.py`:
-
-```python
-connector.connect(
-    login=12345678,
-    password="your_password",
-    server="YourBroker-Server"
-)
-```
-
-### Strategy Parameters
-
-Adjust lot sizes, stop-loss, and take-profit in `trading_engine.py`:
-
-```python
-STRATEGIES = {
-    "XAUUSD": {
-        "lot_size": 0.05,     # Position size
-        "sl_points": 100,     # Stop-loss in points
-        "tp_points": 150,     # Take-profit in points
-    },
-    ...
-}
-```
-
----
-
-## Tech Stack
-
-| Layer     | Technology                                                      |
-| --------- | --------------------------------------------------------------- |
-| Backend   | Python 3.9+, FastAPI, Uvicorn                                   |
-| Frontend  | HTML5, CSS3 (custom dark theme), Vanilla JavaScript             |
-| Real-time | WebSocket (native)                                              |
-| Data      | Pandas, NumPy                                                   |
-| Trading   | MetaTrader5 Python API                                          |
-| Font      | [Inter](https://fonts.google.com/specimen/Inter) (Google Fonts) |
-
----
-
-## License
-
-This project is licensed under the MIT License.
-
----
-
-<p align="center">
-  <sub>Built with ❤️ for algorithmic traders</sub>
-</p>
+> **วิธีแก้ไขที่ถูกหลัก:** ควรสร้างและระบุไฟล์เหล่านี้รวมอยู่ในไฟล์ `.gitignore` ของคุณ เพื่อให้ Git ปฏิเสธที่จะตรวจจับและยกไฟล์สำคัญพวกนี้ไปบันทึกลง History ของระบบ!

@@ -62,7 +62,8 @@ class HistoryDeal:
     symbol: str = ""
     type: int = 0
     volume: float = 0.01
-    price: float = 0.0
+    price_open: float = 0.0
+    price_close: float = 0.0
     profit: float = 0.0
     time: int = 0
     comment: str = ""
@@ -90,6 +91,8 @@ class MT5Connector:
         self._sim_prices: dict[str, float] = {}
         self._sim_ticket_counter = 100000
         self._sim_start_time = time.time()
+        # Maps display name (EURUSD) → broker name (EURUSDm)
+        self._broker_map: dict[str, str] = {s: s for s in self.SYMBOLS}
 
         # Initialize simulated prices
         for symbol, config in self.SYMBOLS.items():
@@ -97,6 +100,24 @@ class MT5Connector:
 
         # Generate some fake trade history
         self._generate_sim_history()
+
+    def _detect_broker_symbols(self):
+        """Auto-detect broker symbol names (e.g. EURUSDm instead of EURUSD)."""
+        # Common suffix/prefix variants brokers use
+        variants = ["", "m", ".", "pro", "stp", "ecn", "raw"]
+        all_broker = {s.name for s in (mt5.symbols_get() or [])}
+        for display_name in self.SYMBOLS:
+            for suffix in variants:
+                candidate = display_name + suffix
+                if candidate in all_broker:
+                    mt5.symbol_select(candidate, True)
+                    self._broker_map[display_name] = candidate
+                    break
+            else:
+                print(f"⚠️  Symbol not found on broker: {display_name}")
+        mapped = [f"{k}→{v}" for k, v in self._broker_map.items() if k != v]
+        if mapped:
+            print(f"🔀 Symbol aliases: {', '.join(mapped)}")
 
     def connect(self, login: int = 0, password: str = "", server: str = "") -> bool:
         """Connect to MT5 terminal."""
@@ -114,6 +135,9 @@ class MT5Connector:
             if not authorized:
                 print(f"❌ MT5 login failed: {mt5.last_error()}")
                 return False
+
+        # Auto-detect broker-specific symbol names
+        self._detect_broker_symbols()
 
         self.connected = True
         print("✅ Connected to MT5 (Live)")
@@ -186,13 +210,15 @@ class MT5Connector:
                 for p in self._positions
             ]
 
+        # Build reverse map: broker name → display name
+        rev_map = {v: k for k, v in self._broker_map.items()}
         positions = mt5.positions_get()
         if positions is None:
             return []
         return [
             {
                 "ticket": p.ticket,
-                "symbol": p.symbol,
+                "symbol": rev_map.get(p.symbol, p.symbol),
                 "type": "BUY" if p.type == 0 else "SELL",
                 "volume": p.volume,
                 "price_open": p.price_open,
@@ -221,7 +247,8 @@ class MT5Connector:
                 "time": int(time.time()),
             }
 
-        tick = mt5.symbol_info_tick(symbol)
+        broker_sym = self._broker_map.get(symbol, symbol)
+        tick = mt5.symbol_info_tick(broker_sym)
         if tick is None:
             return {}
         return {
@@ -265,9 +292,10 @@ class MT5Connector:
             return TradeResult(success=True, ticket=pos.ticket, message=f"Order placed: {order_type} {volume} {symbol}")
 
         # Real MT5 order
-        price_info = mt5.symbol_info_tick(symbol)
+        broker_sym = self._broker_map.get(symbol, symbol)
+        price_info = mt5.symbol_info_tick(broker_sym)
         if price_info is None:
-            return TradeResult(success=False, message=f"Failed to get price for {symbol}")
+            return TradeResult(success=False, message=f"Failed to get price for {symbol} ({broker_sym})")
 
         filling_type = mt5.ORDER_FILLING_IOC
         if order_type.upper() == "BUY":
@@ -279,7 +307,7 @@ class MT5Connector:
 
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
+            "symbol": broker_sym,
             "volume": volume,
             "type": action_type,
             "price": price,
@@ -312,7 +340,8 @@ class MT5Connector:
                         symbol=p.symbol,
                         type=p.type,
                         volume=p.volume,
-                        price=p.price_current,
+                        price_open=p.price_open,
+                        price_close=p.price_current,
                         profit=p.profit,
                         time=int(time.time()),
                         comment="Closed",
@@ -361,36 +390,59 @@ class MT5Connector:
         if self.simulation_mode:
             return [
                 {
-                    "ticket": d.ticket,
-                    "symbol": d.symbol,
-                    "type": "BUY" if d.type == 0 else "SELL",
-                    "volume": d.volume,
-                    "price": d.price,
-                    "profit": round(d.profit, 2),
-                    "time": d.time,
-                    "comment": d.comment,
+                    "ticket":      d.ticket,
+                    "symbol":      d.symbol,
+                    "type":        "BUY" if d.type == 0 else "SELL",
+                    "volume":      d.volume,
+                    "price_open":  round(d.price_open,  5),
+                    "price_close": round(d.price_close, 5),
+                    "profit":      round(d.profit, 2),
+                    "time":        d.time,
+                    "comment":     d.comment,
                 }
                 for d in self._history
             ]
 
+        # Real MT5: group IN/OUT deals by position_id to build round-trips
         from_date = datetime.now() - timedelta(days=days)
         deals = mt5.history_deals_get(from_date, datetime.now())
         if deals is None:
             return []
-        return [
-            {
-                "ticket": d.ticket,
-                "symbol": d.symbol,
-                "type": "BUY" if d.type == 0 else "SELL",
-                "volume": d.volume,
-                "price": d.price,
-                "profit": d.profit,
-                "time": d.time,
-                "comment": d.comment if hasattr(d, 'comment') else "",
-            }
-            for d in deals
-            if d.symbol != ""
-        ]
+        rev_map = {v: k for k, v in self._broker_map.items()}
+
+        # entry: 0=DEAL_ENTRY_IN, 1=DEAL_ENTRY_OUT
+        by_pos: dict = {}
+        for d in deals:
+            if not d.symbol:
+                continue
+            pid = d.position_id
+            if pid not in by_pos:
+                by_pos[pid] = {"in": None, "out": None}
+            entry = getattr(d, "entry", -1)
+            if entry == 0:
+                by_pos[pid]["in"] = d
+            elif entry == 1:
+                by_pos[pid]["out"] = d
+
+        result = []
+        for pid, pair in by_pos.items():
+            out = pair["out"]
+            inn = pair["in"]
+            if out is None:
+                continue  # position still open
+            sym = rev_map.get(out.symbol, out.symbol)
+            result.append({
+                "ticket":      out.ticket,
+                "symbol":      sym,
+                "type":        "BUY" if getattr(inn, "type", 0) == 0 else "SELL",
+                "volume":      out.volume,
+                "price_open":  round(inn.price, 5) if inn else 0.0,
+                "price_close": round(out.price, 5),
+                "profit":      round(out.profit, 2),
+                "time":        out.time,
+                "comment":     out.comment if hasattr(out, "comment") else "",
+            })
+        return result
 
     # ─── Simulation Helpers ─────────────────────────────────────────
 
@@ -446,12 +498,15 @@ class MT5Connector:
             else:
                 profit = round(random.uniform(-80, -5), 2)
 
+            # Simulate close price from open price ± profit direction
+            price_close = round(price + (abs(profit) / 100.0) * (1 if profit > 0 else -1), self.SYMBOLS[symbol]["digits"])
             self._history.append(HistoryDeal(
                 ticket=90000 + i,
                 symbol=symbol,
                 type=trade_type,
                 volume=round(random.choice([0.01, 0.02, 0.05, 0.1]), 2),
-                price=round(price, self.SYMBOLS[symbol]["digits"]),
+                price_open=round(price, self.SYMBOLS[symbol]["digits"]),
+                price_close=price_close,
                 profit=profit,
                 time=now - random.randint(3600, 30 * 86400),
                 comment="Auto-Trade",

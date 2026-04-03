@@ -73,14 +73,20 @@ class TradingEngine:
         },
     }
 
-    def __init__(self, connector):
+    def __init__(self, connector, log_callback=None):
         self.connector = connector
         self.system_active = False
         self.running = False
+        self._log = log_callback or (lambda *a, **kw: None)
+        self._ai_active_fn = None   # set after AI engine is created
         self._price_history: dict[str, list[float]] = {s: [] for s in self.STRATEGIES}
         self._last_trade_time: dict[str, float] = {s: 0 for s in self.STRATEGIES}
         self._trade_cooldown = 60  # seconds between trades per symbol
         self._sim_price_counter = 0
+
+    def set_ai_mode_fn(self, fn):
+        """Set a callable(symbol) -> bool that returns True when AI is trading that symbol."""
+        self._ai_active_fn = fn
 
     def toggle_system(self) -> bool:
         """Toggle the entire trading system ON/OFF."""
@@ -97,6 +103,36 @@ class TradingEngine:
                 "name": self.STRATEGIES[symbol]["name"],
             }
         return {"error": f"Unknown symbol: {symbol}"}
+
+    def update_strategy_settings(self, symbol: str,
+                                  lot_size: float = None,
+                                  sl_points: int = None,
+                                  tp_points: int = None,
+                                  cooldown: int = None,
+                                  enabled: bool = None) -> dict:
+        """Update AI/strategy settings for a specific symbol."""
+        if symbol not in self.STRATEGIES:
+            return {"error": f"Unknown symbol: {symbol}"}
+        cfg = self.STRATEGIES[symbol]
+        if lot_size is not None:
+            cfg["lot_size"] = round(float(lot_size), 2)
+        if sl_points is not None:
+            cfg["sl_points"] = int(sl_points)
+        if tp_points is not None:
+            cfg["tp_points"] = int(tp_points)
+        if enabled is not None:
+            cfg["enabled"] = bool(enabled)
+        if cooldown is not None:
+            self._trade_cooldown = int(cooldown)
+        return {
+            "symbol": symbol,
+            "name": cfg["name"],
+            "enabled": cfg["enabled"],
+            "lot_size": cfg["lot_size"],
+            "sl_points": cfg["sl_points"],
+            "tp_points": cfg["tp_points"],
+            "cooldown": self._trade_cooldown,
+        }
 
     def get_strategies(self) -> list[dict]:
         """Get all strategies with their status."""
@@ -147,6 +183,10 @@ class TradingEngine:
         """Process all enabled strategies."""
         for symbol, config in self.STRATEGIES.items():
             if not config["enabled"]:
+                continue
+
+            # Skip if AI engine is actively trading this symbol
+            if self._ai_active_fn and self._ai_active_fn(symbol):
                 continue
 
             # Get current price
@@ -200,6 +240,11 @@ class TradingEngine:
 
                     if result.success:
                         self._last_trade_time[symbol] = now
+                        self._log(
+                            "TRADE",
+                            f"✅ {signal} {symbol} | {config['name']}",
+                            f"Ticket #{result.ticket} | Lot {config['lot_size']} | SL {sl:.5f} | TP {tp:.5f}",
+                        )
                         print(f"📈 {signal} {symbol} @ {bid:.5f} | SL: {sl:.5f} | TP: {tp:.5f}")
                     else:
                         print(f"❌ Failed {signal} {symbol}: {result.message}")
@@ -214,6 +259,11 @@ class TradingEngine:
                                 result = self.connector.close_position(pos["ticket"])
                                 if result.success:
                                     self._last_trade_time[symbol] = now
+                                    self._log(
+                                        "TRADE",
+                                        f"🔄 Close {symbol} #{pos['ticket']} | {config['name']}",
+                                        f"Opposite signal {signal} — {result.message}",
+                                    )
                                     print(f"🔄 Closed {symbol} position: {result.message}")
 
     def _calculate_signal(self, symbol: str) -> str:

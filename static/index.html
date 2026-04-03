@@ -1,154 +1,874 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>pytradeAI — MT5 Dashboard</title>
-    <meta name="description" content="AI-powered automated trading system connected to MetaTrader 5 with real-time browser dashboard.">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>pytradeAI — Trading Dashboard</title>
+    <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-    <!-- ═══ Header ═══════════════════════════════════════════ -->
-    <header class="header" id="header">
-        <div class="header-left">
-            <span class="header-icon">🤖</span>
-            <h1 class="header-title">pytradeAI</h1>
+<div class="app-shell">
+
+    <!-- ═══════════════════════════════════
+         TOP BAR
+    ════════════════════════════════════ -->
+    <header class="topbar">
+        <a class="topbar-brand" href="#" onclick="return false">
+            <div class="brand-icon">🤖</div>
+            <span class="brand-name">pytradeAI</span>
+        </a>
+
+        <!-- Live price ticker -->
+        <div class="topbar-ticker">
+            <div id="ticker-inner"><!-- populated by JS --></div>
         </div>
-        <div class="header-right">
-            <div class="badge badge-mt5" id="badge-mt5">
+
+        <!-- Right controls -->
+        <div class="topbar-controls">
+            <span id="badge-sim" class="badge badge-sim" style="display:none">SIM</span>
+            <span id="badge-mt5" class="badge badge-mt5 offline">
                 <span class="badge-dot"></span>
-                <span>MT5 Online</span>
-            </div>
-            <button class="btn-system" id="btn-system" onclick="toggleSystem()">
-                <span class="btn-system-icon">⏻</span>
-                <span id="btn-system-text">SYSTEM ON</span>
+                <span id="badge-mt5-text">MT5 Offline</span>
+            </span>
+            <button class="btn btn-icon-only" onclick="openMT5Panel()" title="MT5 Connection">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+            </button>
+            <button id="btn-system" class="btn btn-system off" onclick="toggleSystem()">
+                <span id="btn-system-text">SYSTEM OFF</span>
             </button>
         </div>
     </header>
 
-    <div class="divider"></div>
+    <!-- ═══════════════════════════════════
+         BODY: sidebar + main
+    ════════════════════════════════════ -->
+    <div class="app-body">
 
-    <!-- ═══ Top Row: Account, Win Rate, Strategies ═══════════ -->
-    <section class="top-row">
-        <!-- Account Balance -->
-        <div class="card card-balance" id="card-balance">
-            <div class="card-icon">💼</div>
-            <div class="card-label">ACCOUNT BALANCE</div>
-            <div class="card-value" id="account-balance">$0.00</div>
+        <!-- ─── Sidebar ─────────────────── -->
+        <nav class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-label">เมนูหลัก</div>
+
+                <button class="nav-item active" data-tab="dashboard" onclick="switchTab('dashboard')">
+                    <span class="nav-icon">📊</span>
+                    <span>แดชบอร์ด</span>
+                </button>
+
+                <button class="nav-item" data-tab="trade" onclick="switchTab('trade')">
+                    <span class="nav-icon">💱</span>
+                    <span>เปิดออเดอร์</span>
+                </button>
+
+                <button class="nav-item" data-tab="positions" onclick="switchTab('positions')">
+                    <span class="nav-icon">📋</span>
+                    <span>พอร์ตเปิด</span>
+                </button>
+
+                <button class="nav-item" data-tab="history" onclick="switchTab('history')">
+                    <span class="nav-icon">🗂️</span>
+                    <span>ประวัติเทรด</span>
+                </button>
+
+                <button class="nav-item" data-tab="ai" onclick="switchTab('ai')">
+                    <span class="nav-icon">🧠</span>
+                    <span>วิเคราะห์ AI</span>
+                </button>
+
+                <button class="nav-item" data-tab="strategies" onclick="switchTab('strategies')">
+                    <span class="nav-icon">⚙️</span>
+                    <span>กลยุทธ์</span>
+                </button>
+
+                <button class="nav-item" data-tab="ai-auto" onclick="switchTab('ai-auto')">
+                    <span class="nav-icon">🤖</span>
+                    <span>เทรดออโต้ AI</span>
+                </button>
+
+                <button class="nav-item" data-tab="log" onclick="switchTab('log')">
+                    <span class="nav-icon">📜</span>
+                    <span>บันทึกระบบ</span>
+                </button>
+            </div>
+
+            <!-- Account summary -->
+            <div class="sidebar-account">
+                <div class="acct-panel">
+                    <div class="acct-row">
+                        <span class="acct-lbl">ยอดคงเหลือ</span>
+                        <span id="account-balance" class="acct-val">—</span>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- ─── Main Panel ───────────────── -->
+        <main class="main-panel">
+
+            <!-- ══ TAB: Dashboard ══════════════════════════════════ -->
+            <section id="tab-dashboard" class="tab-page active">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">แดชบอร์ด</h1>
+                        <p class="page-sub">ภาพรวมบัญชีและกลยุทธ์ที่ใช้งาน</p>
+                    </div>
+                    <div class="page-header-actions">
+                        <button class="btn btn-sm btn-cyan" onclick="openAISettings()">ตั้งค่า AI</button>
+                    </div>
+                </div>
+
+                <!-- 4 KPI cards -->
+                <div class="stats-row">
+                    <div class="stat-card c-cyan">
+                        <div class="stat-card-inner">
+                            <div>
+                                <div class="stat-lbl">ยอดเงิน</div>
+                                <div id="dash-balance" class="stat-val">—</div>
+                                <div class="stat-sub">Equity: <span id="account-equity" style="color:var(--cyan)">—</span></div>
+                            </div>
+                            <div class="stat-icon-bg">💰</div>
+                        </div>
+                    </div>
+                    <div class="stat-card c-green">
+                        <div class="stat-card-inner">
+                            <div>
+                                <div class="stat-lbl">อัตราการชนะ</div>
+                                <div id="win-rate" class="stat-val">—</div>
+                                <div class="stat-sub"><span id="total-trades">—</span> เทรดทั้งหมด</div>
+                            </div>
+                            <div class="stat-icon-bg">📈</div>
+                        </div>
+                    </div>
+                    <div class="stat-card c-yellow">
+                        <div class="stat-card-inner">
+                            <div>
+                                <div class="stat-lbl">พอร์ตเปิด</div>
+                                <div id="dash-pos-count" class="stat-val">0</div>
+                                <div class="stat-sub">P&amp;L: <span id="account-profit" class="acct-val">—</span></div>
+                            </div>
+                            <div class="stat-icon-bg">📋</div>
+                        </div>
+                    </div>
+                    <div class="stat-card c-purple">
+                        <div class="stat-card-inner">
+                            <div>
+                                <div class="stat-lbl">กลยุทธ์ทำงาน</div>
+                                <div id="dash-strategies-active" class="stat-val">—</div>
+                                <div class="stat-sub">จาก 6 สัญลักษณ์</div>
+                            </div>
+                            <div class="stat-icon-bg">🤖</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2-col grid: strategies + positions -->
+                <div class="dash-grid">
+
+                    <!-- Strategies -->
+                    <div class="section">
+                        <div class="section-header">
+                            <span class="section-title">
+                                <span class="section-icon">⚙️</span>กลยุทธ์
+                            </span>
+                        </div>
+                        <div class="section-body">
+                            <div id="strategies-grid">
+                                <div class="empty-state"><span class="empty-icon">⏳</span>Loading…</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Live Positions -->
+                    <div class="section">
+                        <div class="section-header">
+                            <span class="section-title">
+                                <span class="section-icon">📋</span>พอร์ตที่เปิดอยู่
+                            </span>
+                            <button class="btn btn-sm" onclick="switchTab('positions')">ดูทั้งหมด →</button>
+                        </div>
+                        <div class="tbl-wrap">
+                            <table class="pos-table">
+                                <thead>
+                                    <tr>
+                                        <th>สัญลักษณ์</th>
+                                        <th>ประเภท</th>
+                                        <th>ล็อต</th>
+                                        <th>ราคาเปิด</th>
+                                        <th>ปัจจุบัน</th>
+                                        <th>กำไร/ขาดทุน</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="positions-body-dash">
+                                    <tr id="no-positions-dash">
+                                        <td colspan="7">
+                                            <div class="empty-state">
+                                                <span class="empty-icon">🗂️</span>ไม่มีพอร์ตที่เปิดอยู่
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                </div><!-- /dash-grid -->
+            </section><!-- /tab-dashboard -->
+
+            <!-- ══ TAB: Manual Trade ════════════════════════════════ -->
+            <section id="tab-trade" class="tab-page">
+
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">เปิดออเดอร์</h1>
+                        <p class="page-sub">เปิดออเดอร์ Market ด่วน</p>
+                    </div>
+                </div>
+
+                <div class="trade-shell">
+
+                    <!-- Order Form -->
+                    <div class="section trade-card">
+                        <div class="section-header">
+                            <span class="section-title"><span class="section-icon">💱</span>Order Entry</span>
+                        </div>
+                        <div class="section-body trade-form-col">
+
+                            <!-- Instrument selector -->
+                            <div class="trade-field">
+                                <label class="trade-lbl">คู่สกุลเงิน</label>
+                                <select id="trade-symbol" class="trade-select" onchange="onSymbolChange()">
+                                    <option value="EURUSD">🇪🇺 EURUSD</option>
+                                    <option value="GBPUSD">🇬🇧 GBPUSD</option>
+                                    <option value="USDJPY">🇯🇵 USDJPY</option>
+                                    <option value="XAUUSD">🥇 XAUUSD</option>
+                                    <option value="BTCUSD">₿ BTCUSD</option>
+                                    <option value="ETHUSD">Ξ ETHUSD</option>
+                                </select>
+                            </div>
+
+                            <!-- BID / ASK price block -->
+                            <div class="price-display-row">
+                                <div class="price-half bid-side">
+                                    <span class="price-tag">BID</span>
+                                    <span id="trade-bid" class="price-num bid-num">—</span>
+                                </div>
+                                <div class="price-divider"></div>
+                                <div class="price-half ask-side">
+                                    <span class="price-tag">ASK</span>
+                                    <span id="trade-ask" class="price-num ask-num">—</span>
+                                </div>
+                            </div>
+
+                            <!-- Inputs -->
+                            <div class="trade-inputs-grid">
+                                <div class="trade-field">
+                                    <label class="trade-lbl">ปริมาณ (ล็อต)</label>
+                                    <input id="trade-volume" class="trade-input" type="number"
+                                           value="0.01" min="0.01" max="10" step="0.01" />
+                                </div>
+                                <div class="trade-field">
+                                    <label class="trade-lbl">หยุดขาดทุน (จุด)</label>
+                                    <input id="trade-sl" class="trade-input" type="number"
+                                           value="100" min="0" step="1" />
+                                </div>
+                                <div class="trade-field">
+                                    <label class="trade-lbl">เป้าหมายกำไร (จุด)</label>
+                                    <input id="trade-tp" class="trade-input" type="number"
+                                           value="200" min="0" step="1" />
+                                </div>
+                            </div>
+
+                            <!-- BUY / SELL -->
+                            <div class="trade-actions">
+                                <button class="btn-buy" onclick="placeOrder('BUY')">▲&nbsp;BUY</button>
+                                <button class="btn-sell" onclick="placeOrder('SELL')">▼&nbsp;SELL</button>
+                            </div>
+
+                        </div>
+                    </div><!-- /trade-card -->
+
+                    <!-- Info sidebar -->
+                    <div class="trade-info-col">
+                        <div class="info-block">
+                            <div class="info-block-title">ข้อมูลออเดอร์</div>
+                            <div class="info-row">
+                                <span class="info-key">สัญลักษณ์</span>
+                                <span id="info-symbol" class="info-val">EURUSD</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">ส่วนต่าง</span>
+                                <span id="info-spread" class="info-val">—</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">รูปแบบ</span>
+                                <span class="info-val">ตลาด</span>
+                            </div>
+                        </div>
+                        <div class="info-block">
+                            <div class="info-block-title">บัญชี</div>
+                            <div class="info-row">
+                                <span class="info-key">ยอดเงิน</span>
+                                <span id="trade-acct-balance" class="info-val">—</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">มูลค่ารวม</span>
+                                <span id="trade-acct-equity" class="info-val">—</span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div><!-- /trade-shell -->
+
+            </section><!-- /tab-trade -->
+
+
+
+            <!-- ══ TAB: Positions ══════════════════════════════════ -->
+            <section id="tab-positions" class="tab-page">
+
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">พอร์ตที่เปิดอยู่</h1>
+                        <p class="page-sub">สถานะออเดอร์แบบเรียลไทม์</p>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-header">
+                        <span class="section-title"><span class="section-icon">📋</span>รายการพอร์ต</span>
+                    </div>
+                    <div class="tbl-wrap">
+                        <table class="pos-table">
+                            <thead>
+                                <tr>
+                                    <th>สัญลักษณ์</th>
+                                    <th>ประเภท</th>
+                                    <th>ล็อต</th>
+                                    <th>ราคาเปิด</th>
+                                    <th>ราคาปัจจุบัน</th>
+                                    <th>หยุดขาดทุน</th>
+                                    <th>เป้าหมาย</th>
+                                    <th>กำไร/ขาดทุน</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="positions-body">
+                                <tr id="no-positions">
+                                    <td colspan="9">
+                                        <div class="empty-state">
+                                            <span class="empty-icon">🗂️</span>
+                                            ไม่มีพอร์ตที่เปิดอยู่
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </section><!-- /tab-positions -->
+
+            <!-- ══ TAB: History ═══════════════════════════════════ -->
+            <section id="tab-history" class="tab-page">
+
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">ประวัติการเทรด</h1>
+                        <p class="page-sub">ออเดอร์ที่ปิดแล้วและสรุปผลการเทรด</p>
+                    </div>
+                    <div class="page-header-actions">
+                        <div class="history-filter">
+                            <label class="history-days-label">ช่วง</label>
+                            <select id="history-days" class="input-sm" onchange="loadHistory()">
+                                <option value="7">7 วัน</option>
+                                <option value="30" selected>30 วัน</option>
+                                <option value="90">90 วัน</option>
+                                <option value="365">1 ปี</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-sm" onclick="loadHistory()">↺ รีเฟรช</button>
+                    </div>
+                </div>
+
+                <!-- Summary KPIs -->
+                <div class="stats-row" id="history-kpis" style="display:none">
+                    <div class="stat-card c-cyan">
+                        <div class="stat-card-inner">
+                            <div>
+                                <div class="stat-lbl">เทรดทั้งหมด</div>
+                                <div id="hist-total" class="stat-val">—</div>
+                            </div>
+                            <div class="stat-icon-bg">📊</div>
+                        </div>
+                    </div>
+                    <div class="stat-card c-green">
+                        <div class="stat-card-inner">
+                            <div>
+                                <div class="stat-lbl">อัตราชนะ</div>
+                                <div id="hist-winrate" class="stat-val">—</div>
+                                <div class="stat-sub"><span id="hist-wins">—</span> ชนะ / <span id="hist-losses">—</span> แพ้</div>
+                            </div>
+                            <div class="stat-icon-bg">🏆</div>
+                        </div>
+                    </div>
+                    <div class="stat-card c-yellow">
+                        <div class="stat-card-inner">
+                            <div>
+                                <div class="stat-lbl">กำไร/ขาดทุนสุทธิ</div>
+                                <div id="hist-pnl" class="stat-val">—</div>
+                            </div>
+                            <div class="stat-icon-bg">💰</div>
+                        </div>
+                    </div>
+                    <div class="stat-card c-purple">
+                        <div class="stat-card-inner">
+                            <div>
+                                <div class="stat-lbl">เทรดดีที่สุด</div>
+                                <div id="hist-best" class="stat-val">—</div>
+                            </div>
+                            <div class="stat-icon-bg">📈</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Balance Chart -->
+                <div class="section" id="balance-chart-section" style="display:none">
+                    <div class="section-header">
+                        <span class="section-title"><span class="section-icon">📈</span>กราฟกำไร/ขาดทุนสะสม</span>
+                    </div>
+                    <div class="balance-chart-wrap">
+                        <canvas id="balance-chart"></canvas>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-body" style="padding:0">
+                        <table class="history-table">
+                            <thead>
+                                <tr>
+                                    <th>เวลา</th>
+                                    <th>เลขที่</th>
+                                    <th>สัญลักษณ์</th>
+                                    <th>ประเภท</th>
+                                    <th>ล็อต</th>
+                                    <th>ราคาเปิด</th>
+                                    <th>ราคาปิด</th>
+                                    <th>กำไร/ขาดทุน</th>
+                                    <th>หมายเหตุ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-tbody">
+                                <tr><td colspan="9"><div class="empty-state"><span class="empty-icon">🗂️</span>Loading…</div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </section><!-- /tab-history -->
+
+            <!-- ══ TAB: AI Insights ════════════════════════════════ -->
+            <section id="tab-ai" class="tab-page">
+
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">วิเคราะห์ AI</h1>
+                        <p class="page-sub">วิเคราะห์ผลการเทรดด้วย Machine Learning</p>
+                    </div>
+                    <button class="btn btn-sm" onclick="openRetrain()">🔄 Retrain Suggestions</button>
+                </div>
+
+                <!-- KPI insights -->
+                <div class="insights-grid">
+                    <div class="insight-card">
+                        <div class="insight-lbl">สัญลักษณ์ที่ขาดทุนมาก</div>
+                        <div id="most-lost-symbol" class="insight-val">—</div>
+                        <span class="insight-tag red">⚠ ผลงานแย่สุด</span>
+                    </div>
+                    <div class="insight-card">
+                        <div class="insight-lbl">ทิศทางอ่อนแอ</div>
+                        <div id="weakest-action" class="insight-val">—</div>
+                        <span class="insight-tag yellow">📉 ต้องปรับปรุง</span>
+                    </div>
+                    <div class="insight-card">
+                        <div class="insight-lbl">ขาดทุนสะสม</div>
+                        <div id="total-loss-impact" class="insight-val">—</div>
+                        <span class="insight-tag red">💸 ขาดทุนรวม</span>
+                    </div>
+                </div>
+
+                <!-- AI Settings quick access -->
+                <div class="section">
+                    <div class="section-header">
+                        <span class="section-title"><span class="section-icon">🤖</span>ตั้งค่า AI</span>
+                        <button class="btn btn-sm btn-cyan" onclick="openAISettings()">ตั้งค่าต่อสัญลักษณ์ →</button>
+                    </div>
+                    <div class="section-body">
+                        <p style="font-size:13px; color: var(--text-secondary); line-height:1.7">
+                            The AI analyses patterns in price action and trade history to decide when to enter and exit
+                            positions. Use the configuration panel to adjust risk parameters per symbol — lot size,
+                            stop loss, take profit, and cooldown between trades.
+                        </p>
+                    </div>
+                </div>
+
+            </section><!-- /tab-ai -->
+
+            <!-- ══ TAB: Strategies ════════════════════════════════= -->
+            <section id="tab-strategies" class="tab-page">
+
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">กลยุทธ์</h1>
+                        <p class="page-sub">เปิด/ปิดการเทรดอัตโนมัติรายสัญลักษณ์</p>
+                    </div>
+                    <button class="btn btn-sm btn-cyan" onclick="openAISettings()">⚙️ ตั้งค่า AI</button>
+                </div>
+
+                <div class="section">
+                    <div class="section-header">
+                        <span class="section-title"><span class="section-icon">📡</span>กลยุทธ์รายสัญลักษณ์</span>
+                    </div>
+                    <div class="section-body">
+                        <div id="strategies-grid-full">
+                            <div class="empty-state"><span class="empty-icon">⏳</span>Loading…</div>
+                        </div>
+                    </div>
+                </div>
+
+            </section><!-- /tab-strategies -->
+
+            <!-- ══ TAB: AI Auto Trade ══════════════════════════════ -->
+            <section id="tab-ai-auto" class="tab-page">
+
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">เทรดออโต้ AI</h1>
+                        <p class="page-sub">AI วิเคราะห์ตลาดและส่งออเดอร์อัตโนมัติ</p>
+                    </div>
+                    <div class="page-header-actions">
+                        <button class="btn btn-sm" onclick="loadAILog()">↺ รีเฟรช</button>
+                        <button id="btn-ai-analyze-all" class="btn btn-sm btn-cyan" onclick="analyzeAllSymbols()">🔍 วิเคราะห์ทั้งหมด</button>
+                    </div>
+                </div>
+
+                <!-- Master switch + provider info -->
+                <div class="section">
+                    <div class="section-header">
+                        <span class="section-title"><span class="section-icon">⚡</span>สวิตช์หลัก</span>
+                        <button class="btn btn-sm btn-cyan" onclick="openAISettings()">⚙ ตั้งค่า Provider</button>
+                    </div>
+                    <div class="section-body" style="display:flex; align-items:center; gap:16px; flex-wrap:wrap">
+                        <div class="ai-master-toggle" id="ai-master-box" style="flex:1; min-width:220px">
+                            <div>
+                                <div style="font-size:13px; font-weight:700; color:var(--text-primary)">AI เทรดอัตโนมัติ</div>
+                                <div id="ai-master-status" style="font-size:11px; color:var(--text-secondary); margin-top:2px">ปิดอยู่ — ไม่มีออเดอร์ใหม่</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="ai-master-switch" onchange="toggleAIMaster()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="info-block" style="flex:1; min-width:180px">
+                            <div class="info-block-title">ผู้ให้บริการ AI</div>
+                            <div class="info-row">
+                                <span class="info-key">ที่ใช้งาน</span>
+                                <span id="ai-provider-name" class="info-val">—</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">API Key</span>
+                                <span id="ai-key-status" class="info-val">—</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-key">ช่วงวิเคราะห์</span>
+                                <span id="ai-interval-val" class="info-val">—</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Per-symbol AI cards -->
+                <div class="section">
+                    <div class="section-header">
+                        <span class="section-title"><span class="section-icon">📡</span>วิเคราะห์และเทรดออโต้</span>
+                    </div>
+                    <div class="section-body">
+                        <div id="ai-symbols-grid" style="display:flex; flex-direction:column; gap:10px">
+                            <div class="empty-state"><span class="empty-icon">⏳</span>Loading…</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Activity log -->
+                <div class="section">
+                    <div class="section-header">
+                        <span class="section-title"><span class="section-icon">📝</span>บันทึก AI</span>
+                    </div>
+                    <div class="section-body" style="padding:0">
+                        <div id="ai-log-list" class="ai-log" style="padding:10px 14px">
+                            <div class="empty-state"><span class="empty-icon">📋</span>No activity yet</div>
+                        </div>
+                    </div>
+                </div>
+
+            </section><!-- /tab-ai-auto -->
+
+            <!-- ══ TAB: System Log ════════════════════════════════ -->
+            <section id="tab-log" class="tab-page">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">บันทึกระบบ</h1>
+                        <p class="page-sub">เหตุการณ์การเทรด การเชื่อมต่อ และระบบทั้งหมด</p>
+                    </div>
+                    <div class="page-header-actions">
+                        <button class="btn btn-sm" onclick="loadSystemLog()">↺ รีเฟรช</button>
+                        <button class="btn btn-sm btn-danger" onclick="clearLogDisplay()">🗑 ล้างหน้าจอ</button>
+                    </div>
+                </div>
+                <div class="section">
+                    <div class="section-body" style="padding:0">
+                        <table class="log-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:160px">เวลา</th>
+                                    <th style="width:120px">หมวดหมู่</th>
+                                    <th>ข้อความ</th>
+                                    <th>รายละเอียด</th>
+                                </tr>
+                            </thead>
+                            <tbody id="log-tbody">
+                                <tr><td colspan="4"><div class="empty-state"><span class="empty-icon">📋</span>ยังไม่มีกิจกรรม</div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section><!-- /tab-log -->
+
+        </main><!-- /main-panel -->
+    </div><!-- /app-body -->
+</div><!-- /app-shell -->
+
+
+<!-- ═══════════════════════════════════════
+     MT5 CONNECTION MODAL
+════════════════════════════════════════ -->
+<div id="mt5-modal" class="modal-overlay" onclick="closeMT5Panel(event)">
+    <div class="modal-box">
+        <div class="modal-head">
+            <span class="modal-title">⚡ MT5 Connection</span>
+            <button class="modal-close" onclick="closeMT5Panel()">✕</button>
         </div>
 
-        <!-- Win Rate -->
-        <div class="card card-winrate" id="card-winrate">
-            <div class="card-icon">📊</div>
-            <div class="card-label">WIN RATE (30 DAYS)</div>
-            <div class="card-value" id="win-rate">0%</div>
+        <!-- Tabs -->
+        <div class="modal-tabs">
+            <button class="modal-tab active" data-mt5tab="accounts" onclick="switchMT5Tab('accounts')">Saved Accounts</button>
+            <button class="modal-tab" data-mt5tab="connect" onclick="switchMT5Tab('connect')">Connect</button>
         </div>
 
-        <!-- Active Strategies -->
-        <div class="card card-strategies" id="card-strategies">
-            <div class="card-header-inline">
-                <span class="card-header-icon">⚙️</span>
-                <span class="card-header-text">ACTIVE STRATEGIES</span>
+        <!-- Tab: Saved Accounts -->
+        <div id="mt5-tab-accounts" class="modal-tab-pane active">
+            <!-- Status bar -->
+            <div class="conn-status-bar">
+                <span id="conn-status-icon">⭕</span>
+                <span id="conn-status-text">Disconnected</span>
+                <span id="conn-mode-badge" class="conn-mode-badge" style="display:none">SIM</span>
             </div>
-            <div class="strategies-grid" id="strategies-grid">
-                <!-- Populated by JS -->
-            </div>
-        </div>
-    </section>
 
-    <!-- ═══ R&D Insights ═════════════════════════════════════ -->
-    <section class="insights-section" id="insights-section">
-        <div class="insights-header">
-            <div class="insights-title">
-                <span class="insights-icon">🧬</span>
-                <span>Research & Development (AI Insights)</span>
+            <div class="saved-accounts-header">
+                <span class="saved-title">Saved Accounts</span>
+                <span id="saved-accounts-count" class="saved-count">0</span>
             </div>
-            <button class="btn-retrain" id="btn-retrain" onclick="openRetrain()">
-                <span>🔄</span> Retrain AI Models
-            </button>
-        </div>
-        <div class="insights-cards">
-            <div class="insight-card insight-most-lost">
-                <div class="insight-label">Most Lost Symbol</div>
-                <div class="insight-value" id="most-lost-symbol">None!</div>
-            </div>
-            <div class="insight-card insight-weakest">
-                <div class="insight-label">Weakest Action</div>
-                <div class="insight-value" id="weakest-action">Perfect</div>
-            </div>
-            <div class="insight-card insight-loss-impact">
-                <div class="insight-label">Total Loss Impact</div>
-                <div class="insight-value" id="total-loss-impact">$0.00</div>
-            </div>
-        </div>
-    </section>
 
-    <!-- ═══ Live Open Positions ══════════════════════════════ -->
-    <section class="positions-section" id="positions-section">
-        <div class="positions-header">
-            <div class="positions-title">
-                <span class="positions-icon">⚡</span>
-                <span>Live Open Positions</span>
+            <div id="saved-accounts-list" class="saved-accounts-list">
+                <div class="saved-empty">No saved accounts yet</div>
             </div>
-            <div class="positions-update-text" id="update-timer">Updates every 2 seconds</div>
-        </div>
-        <div class="positions-table-wrapper">
-            <table class="positions-table" id="positions-table">
-                <thead>
-                    <tr>
-                        <th>Symbol</th>
-                        <th>Action</th>
-                        <th>Lot Size</th>
-                        <th>Open Price</th>
-                        <th>Current Price</th>
-                        <th>Floating P&L</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody id="positions-body">
-                </tbody>
-            </table>
-            <div class="no-positions" id="no-positions">
-                <div class="no-positions-icon">🍔</div>
-                <div>No active positions</div>
-            </div>
-        </div>
-    </section>
 
-    <!-- ═══ Retrain Modal ════════════════════════════════════ -->
-    <div class="modal-overlay" id="retrain-modal" onclick="closeRetrain(event)">
-        <div class="modal-content" onclick="event.stopPropagation()">
-            <div class="modal-header">
-                <h2>🧠 AI Retrain Suggestions</h2>
-                <button class="modal-close" onclick="closeRetrain()">✕</button>
+            <div style="margin-top:14px">
+                <button class="btn btn-danger" style="width:100%; justify-content:center" onclick="doMT5Disconnect()">Disconnect</button>
             </div>
-            <div class="modal-body" id="retrain-body">
-                <div class="loading-spinner"></div>
-                <p>Analyzing performance data...</p>
+        </div>
+
+        <!-- Tab: Connect / New Account -->
+        <div id="mt5-tab-connect" class="modal-tab-pane">
+
+            <div class="form-group">
+                <label class="form-label">Account Name <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
+                <input id="mt5-name" class="form-input" type="text" placeholder="e.g. Demo Account" />
             </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Login</label>
+                    <input id="mt5-login" class="form-input" type="number" placeholder="12345678" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input id="mt5-password" class="form-input" type="password" placeholder="••••••••" />
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Server</label>
+                <input id="mt5-server" class="form-input" type="text" placeholder="BrokerName-Demo" />
+            </div>
+
+            <div class="form-group">
+                <label class="form-check">
+                    <input id="mt5-auto-connect" type="checkbox" />
+                    Auto-connect on startup
+                </label>
+            </div>
+
+            <div style="display:flex; gap:8px; margin-top:4px">
+                <button class="btn btn-primary" style="flex:1; justify-content:center; padding:11px" onclick="doMT5Connect()">
+                    Connect
+                </button>
+                <button class="btn btn-save-account" onclick="doSaveAccount()">
+                    💾 Save
+                </button>
+            </div>
+
+        </div>
+
+    </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════
+     AI SETTINGS MODAL
+════════════════════════════════════════ -->
+<div id="ai-settings-modal" class="modal-overlay" onclick="closeAISettings(event)">
+    <div class="modal-box modal-xl">
+        <div class="modal-head">
+            <span class="modal-title">🤖 AI Auto Trade Settings</span>
+            <button class="modal-close" onclick="closeAISettings()">✕</button>
+        </div>
+
+        <div class="ai-modal-layout">
+
+            <!-- Left nav -->
+            <div class="ai-modal-sidebar">
+                <div class="ai-modal-sidebar-label">Configuration</div>
+                <button class="ai-side-btn active" data-aipane="provider" onclick="switchAIPane('provider')">
+                    <span class="ai-side-icon">🔑</span>Provider &amp; API
+                </button>
+                <button class="ai-side-btn" data-aipane="symbols" onclick="switchAIPane('symbols')">
+                    <span class="ai-side-icon">📡</span>Per-Symbol Settings
+                </button>
+                <div class="ai-modal-sidebar-label" style="margin-top:10px">Strategies</div>
+                <button class="ai-side-btn" data-aipane="strategy" onclick="switchAIPane('strategy')">
+                    <span class="ai-side-icon">⚙️</span>Strategy Config
+                </button>
+            </div>
+
+            <!-- Pane: Provider -->
+            <div id="ai-pane-provider" class="ai-modal-pane active">
+                <div>
+                    <div style="font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px">AI Provider</div>
+                    <div class="provider-toggle">
+                        <button class="provider-btn" id="prov-btn-minimax" onclick="selectProvider('minimax')">
+                            🧠 MiniMax
+                        </button>
+                        <button class="provider-btn" id="prov-btn-gemini" onclick="selectProvider('gemini')">
+                            ✨ Gemini
+                        </button>
+                    </div>
+                </div>
+
+                <!-- MiniMax config -->
+                <div id="minimax-config">
+                    <div class="form-group">
+                        <label class="form-label">MiniMax API Key</label>
+                        <input id="minimax-api-key" class="form-input" type="password" placeholder="eyJ0…" autocomplete="off" />
+                        <div style="font-size:11px; color:var(--text-muted); margin-top:4px">
+                            Get your key at <a href="https://platform.minimax.chat" target="_blank" style="color:var(--cyan)">platform.minimax.chat</a>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Model</label>
+                        <select id="minimax-model" class="form-input">
+                            <option value="MiniMax-Text-01">MiniMax-Text-01</option>
+                            <option value="abab6.5s-chat">abab6.5s-chat</option>
+                            <option value="abab5.5s-chat">abab5.5s-chat</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Gemini config -->
+                <div id="gemini-config" style="display:none">
+                    <div class="form-group">
+                        <label class="form-label">Gemini API Key</label>
+                        <input id="gemini-api-key" class="form-input" type="password" placeholder="AIza…" autocomplete="off" />
+                        <div style="font-size:11px; color:var(--text-muted); margin-top:4px">
+                            Get your key at <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--cyan)">aistudio.google.com</a>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Model</label>
+                        <select id="gemini-model" class="form-input">
+                            <option value="gemini-1.5-flash">gemini-1.5-flash (Fast)</option>
+                            <option value="gemini-1.5-pro">gemini-1.5-pro (Smart)</option>
+                            <option value="gemini-2.0-flash">gemini-2.0-flash (Latest)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Analysis Interval (seconds)</label>
+                    <input id="ai-analysis-interval" class="form-input" type="number" value="60" min="30" max="3600" step="10" />
+                    <div style="font-size:11px; color:var(--text-muted); margin-top:4px">How often AI checks each enabled symbol (min 30s)</div>
+                </div>
+
+                <div style="display:flex; gap:8px; margin-top:4px">
+                    <button class="btn btn-primary" style="flex:1; justify-content:center" onclick="saveProviderSettings()">💾 Save Settings</button>
+                    <button class="btn btn-cyan" onclick="testAIConnection()">🔌 Test Connection</button>
+                </div>
+                <div id="provider-test-result" style="font-size:12px; color:var(--text-secondary); min-height:18px"></div>
+            </div>
+
+            <!-- Pane: Per-symbol -->
+            <div id="ai-pane-symbols" class="ai-modal-pane">
+                <div style="font-size:11px; color:var(--text-secondary); line-height:1.6; margin-bottom:4px">
+                    Enable <strong style="color:var(--cyan)">AI Auto Trade</strong> per symbol. When enabled and the master switch is ON, the AI will automatically open orders when confidence is ≥ 60% and risk is not HIGH.
+                </div>
+                <div id="ai-symbol-settings-list">
+                    <div class="empty-state"><span class="empty-icon">⏳</span>Loading…</div>
+                </div>
+            </div>
+
+            <!-- Pane: Strategy config (legacy) -->
+            <div id="ai-pane-strategy" class="ai-modal-pane">
+                <div style="font-size:11px; color:var(--text-secondary); line-height:1.6; margin-bottom:4px">
+                    Configure the built-in technical strategy (RSI + MA) per symbol. These settings apply to both manual-enable and AI-triggered trades.
+                </div>
+                <div id="ai-settings-body">
+                    <div class="empty-state"><span class="empty-icon">⏳</span>Loading…</div>
+                </div>
+            </div>
+
+        </div><!-- /ai-modal-layout -->
+    </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════
+     RETRAIN MODAL
+════════════════════════════════════════ -->
+<div id="retrain-modal" class="modal-overlay" onclick="closeRetrain(event)">
+    <div class="modal-box">
+        <div class="modal-head">
+            <span class="modal-title">🔄 Retrain Suggestions</span>
+            <button class="modal-close" onclick="closeRetrain()">✕</button>
+        </div>
+        <div class="modal-body" id="retrain-body">
+            <div class="loading-spinner"></div>
         </div>
     </div>
+</div>
 
-    <!-- ═══ Rankings Modal ═══════════════════════════════════ -->
-    <div class="modal-overlay" id="rankings-modal" onclick="closeRankings(event)">
-        <div class="modal-content modal-wide" onclick="event.stopPropagation()">
-            <div class="modal-header">
-                <h2>📊 Symbol Rankings</h2>
-                <button class="modal-close" onclick="closeRankings()">✕</button>
-            </div>
-            <div class="modal-body" id="rankings-body">
-                <div class="loading-spinner"></div>
-                <p>Analyzing symbols...</p>
-            </div>
-        </div>
-    </div>
 
-    <!-- ═══ Toast Notifications ══════════════════════════════ -->
-    <div class="toast-container" id="toast-container"></div>
+<!-- Toast Container -->
+<div id="toast-container" class="toast-container"></div>
 
-    <script src="/static/app.js"></script>
+<script src="/static/app.js"></script>
 </body>
 </html>
