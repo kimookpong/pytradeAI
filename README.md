@@ -148,20 +148,35 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-#### 5. ตั้งค่า Configuration (เลือกที่เหมาะสม)
+#### 5. ตั้งค่า Configuration Files
 
-**สำหรับเทรดสดกับ MT5:**
+**ไฟล์เซิร์ฟเวอร์ (Backend) - ใช้ JSON:**
 
-```bash
-# แก้ไข ai_settings.json หรือ .env ด้วยข้อมูล API Keys
-nano ai_settings.json
+สร้างไฟล์ **`ai_settings.json`** สำหรับ API Keys:
+```json
+{
+  "gemini_api_key": "YOUR_GEMINI_API_KEY",
+  "minimax_api_key": "YOUR_MINIMAX_API_KEY",
+  "ai_trade_enabled": false,
+  "max_positions": 5
+}
 ```
 
-**สำหรับโหมดจำลอง:**
-
-```bash
-# ไม่ต้องอะไร ระบบจะใช้โหมด Simulation โดยอัตโนมัติ
+สร้างไฟล์ **`mt5_accounts.json`** สำหรับ MT5 Broker:
+```json
+{
+  "accounts": [
+    {
+      "login": 123456789,
+      "password": "YOUR_PASSWORD",
+      "server": "Exness-MT5",
+      "is_demo": false
+    }
+  ]
+}
 ```
+
+> ⚠️ **เตือน**: ไฟล์เหล่านี้มีข้อมูลอ่อนไหว - ห้ามอัปโหลดไป Git!
 
 #### 6. รันเซิร์ฟเวอร์
 
@@ -179,18 +194,17 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8888 --reload
 
 ในการทำงานกับระบบเทรดที่มีข้อมูลการเงิน **ความปลอดภัย** ถือเป็นลำดับความสำคัญสูงสุด ต้องป้องกันไฟล์เหล่านี้จากการ Commit:
 
-#### 1️⃣ ข้อมูล Credentials & API Keys
+#### 1️⃣ ข้อมูล Credentials & Secrets (Backend)
 
-| ไฟล์                | เหตุผล                                   | การแก้ไข               |
-| ------------------- | ---------------------------------------- | ---------------------- |
-| `mt5_accounts.json` | เก็บ Account, Password สำหรับ MT5 Broker | เพิ่มลงใน `.gitignore` |
-| `ai_settings.json`  | เก็บ API Keys (Gemini, MiniMax, ฯลฯ)     | เพิ่มลงใน `.gitignore` |
-| `.env`              | ตัวแปร Environment สำหรับระบบ            | เพิ่มลงใน `.gitignore` |
+| ไฟล์ | เนื้อหา | ความเสี่ยง |
+|-----|--------|---------|
+| `mt5_accounts.json` | MT5 Login, Password, Server | 🔴 Critical |
+| `ai_settings.json` | Gemini API Key, MiniMax API Key | 🔴 Critical |
+| `.env` | Environment Variables | 🔴 Critical |
 
-**⚠️ ความเสี่ยง**: หากเกิดการรั่วไหลอาจส่งผลให้:
-
-- บัญชี Trading ถูกบุกรุก
-- API Keys ถูกอาจารปฏิบัติเพื่อ DDoS หรือขุดเชื่อ
+**⚠️ ความเสี่ยงจากการรั่วไหล:**
+- MT5 Account ถูกบุกรุก → สูญเสียเงิน
+- API Keys หลุด → มีคนใช้จนเสียเงิน
 - บัตรเครดิต/บัญชีธนาคารมีความเสี่ยง
 
 #### 2️⃣ ไฟล์ Environment ที่หนักเครื่อง
@@ -224,17 +238,21 @@ __pycache__/
 dist/
 build/
 
-# Credentials & Sensitive Info
-mt5_accounts.json
-ai_settings.json
-.env
-.env.local
-*.key
-*.pem
+# 🔴 CRITICAL: Backend Credentials & Sensitive Files
+# ห้ามไม่ให้ Commit ไฟล์เหล่านี้!
+mt5_accounts.json          # MT5 Login Credentials
+ai_settings.json           # API Keys (Gemini, MiniMax)
+.env                       # Environment Variables
+.env.local                 # Local Environment Overrides
+.env.*.local              # Environment-specific secrets
+config.private.json       # Private Configuration
 
-# Temporary Files
+# Temporary Files & Logs
 *.log
 *.tmp
+*.csv
+cache/
+backup/
 .DS_Store
 Thumbs.db
 
@@ -243,18 +261,21 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Browser Cache
+node_modules/
 ```
 
-### 🔐 วิธีการตรวจสอบก่อน Push
+### 🔐 การตรวจสอบก่อน Commit
 
 ```bash
-# ไม่ให้ Commit ไฟล์ที่อยู่ใน .gitignore
-git check-ignore -v <filename>
-
-# ดูว่าไฟล์ไหนกำลังจะติดขึ้น Git
+# ดูไฟล์ที่จะ commit
 git status
 
-# Review ก่อน commit
+# หาไฟล์ที่ไม่ควร commit
+git check-ignore -v mt5_accounts.json ai_settings.json
+
+# ดูรายละเอียด changes
 git diff --cached
 ```
 
@@ -287,34 +308,68 @@ pytradeAI/
 
 ---
 
-## 📊 ตัวแปรและการตั้งค่า
+## 📊 สถาปัตยกรรมการจัดเก็บข้อมูล (Data Storage Architecture)
 
-### File: `ai_settings.json`
+ระบบใช้แนวทาง **Hybrid** - Backend ใช้ JSON files, Frontend ใช้ localStorage:
 
-```json
-{
-  "gemini_api_key": "YOUR_GEMINI_API_KEY",
-  "minimax_api_key": "YOUR_MINIMAX_API_KEY",
-  "ai_trade_enabled": false,
-  "max_positions": 5,
-  "max_daily_loss_usd": 500
+### 🖥️ Backend (Server-Side) - JSON Files
+
+ไฟล์ JSON เก็บ configuration และ credentials สำคัญ:
+
+| ไฟล์ | วัตถุประสงค์ | ความเสี่ยง |
+|-----|----------|---------|
+| `ai_settings.json` | API Keys (Gemini, MiniMax) | 🔴 Critical |
+| `mt5_accounts.json` | MT5 Broker Credentials | 🔴 Critical |
+
+**ตัวอย่าง structure:**
+```
+Backend
+├── ai_settings.json       ← API Keys (ต้องการป้องกัน!)
+├── mt5_accounts.json      ← MT5 Login (ต้องการป้องกัน!)
+└── server.py              ← โหลดไฟล์เหล่านี้เมื่อ startup
+```
+
+### 🌐 Frontend (Browser-Side) - LocalStorage
+
+เบราว์เซอร์เก็บข้อมูล UI state และ user preferences ใน localStorage:
+
+```javascript
+// LocalStorage Keys (เห็นได้ใน app.js)
+const StorageKeys = {
+  ACCOUNTS: "pytrade_accounts",              // Account settings
+  AI_SETTINGS: "pytrade_ai_settings",        // AI UI preferences
+  STRATEGY_SETTINGS: "pytrade_strategy_settings",
+  TODAY_TRADES: "pytrade_today_trades",      // Trade history
+  SYSTEM_LOG: "pytrade_system_log",          // Error logs
+  AI_THINKING_LOG: "pytrade_ai_thinking_log" // AI analysis logs
 }
 ```
 
-### File: `mt5_accounts.json`
+**ข้อจำกัด LocalStorage:**
+- ⚠️ ขนาดสูงสุด: ~5-10 MB (ขึ้นอยู่กับเบราว์เซอร์)
+- ⚠️ ข้อมูลเป็น plaintext (ไม่เข้ารหัส)
+- ⚠️ สูญหายเมื่อล้างข้อมูลเบราว์เซอร์
+- ✅ เหมาะสำหรับ UI state และ logging
 
-```json
-{
-  "accounts": [
-    {
-      "login": 123456789,
-      "password": "your_password",
-      "server": "Exness-MT5",
-      "is_demo": false
-    }
-  ]
-}
+### 🔒 ความปลอดภัยของข้อมูล
+
+**Frontend - LocalStorage (ไม่ป้องกัน):**
+```javascript
+// ❌ ไม่เก็บไว้ใน localStorage
+localStorage.setItem('api_keys', JSON.stringify({...}))
+localStorage.setItem('mt5_password', myPassword)
+
+// ✅ เก็บได้
+localStorage.setItem('theme', 'dark')
+localStorage.setItem('language', 'th')
+localStorage.setItem('last_chart_symbol', 'BTCUSD')
 ```
+
+**Backend - JSON Files (ต้องป้องกัน):**
+1. เพิ่มเข้า `.gitignore` เพื่อป้องกัน commit
+2. ตั้ง file permissions ให้ private (chmod 600 บน Linux)
+3. ไม่ให้ใครเข้าถึงนอกจากระบบ
+4. ใช้ environment variables สำหรับ sensitive data (ทางเลือก)
 
 ---
 
