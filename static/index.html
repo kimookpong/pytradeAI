@@ -26,15 +26,14 @@
         <!-- Right controls -->
         <div class="topbar-controls">
             <span id="badge-sim" class="badge badge-sim" style="display:none">SIM</span>
-            <span id="badge-mt5" class="badge badge-mt5 offline">
+            <span id="badge-mt5" class="badge badge-mt5 offline badge-indicator" title="MT5 Status">
                 <span class="badge-dot"></span>
-                <span id="badge-mt5-text">MT5 Offline</span>
             </span>
             <button class="btn btn-icon-only" onclick="openMT5Panel()" title="MT5 Connection">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
             </button>
-            <button id="btn-system" class="btn btn-system off" onclick="toggleSystem()">
-                <span id="btn-system-text">SYSTEM OFF</span>
+            <button id="btn-system" class="btn btn-system off" onclick="toggleSystem()" title="Trading System">
+                <span id="btn-system-text">OFF</span>
             </button>
         </div>
     </header>
@@ -116,7 +115,7 @@
                     </div>
                 </div>
 
-                <!-- 4 KPI cards -->
+                <!-- 5 KPI cards -->
                 <div class="stats-row">
                     <div class="stat-card c-cyan">
                         <div class="stat-card-inner">
@@ -158,60 +157,79 @@
                             <div class="stat-icon-bg">🤖</div>
                         </div>
                     </div>
+                    <div class="stat-card c-orange">
+                        <div class="stat-card-inner">
+                            <div>
+                                <div class="stat-lbl">วันนี้</div>
+                                <div id="today-result" class="stat-val">—</div>
+                                <div class="stat-sub"><span id="today-trades">0</span> เทรด | <span id="today-winrate">—</span>%</div>
+                            </div>
+                            <div class="stat-icon-bg">📅</div>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- 2-col grid: strategies + positions -->
-                <div class="dash-grid">
-
-                    <!-- Strategies -->
-                    <div class="section">
-                        <div class="section-header">
-                            <span class="section-title">
-                                <span class="section-icon">⚙️</span>กลยุทธ์
-                            </span>
-                        </div>
-                        <div class="section-body">
-                            <div id="strategies-grid">
-                                <div class="empty-state"><span class="empty-icon">⏳</span>Loading…</div>
+                <!-- Combined Strategies + Conditions section -->
+                <div class="section">
+                    <div class="section-header">
+                        <span class="section-title">
+                            <span class="section-icon">⚙️</span>กลยุทธ์และเงื่อนไขการเทรด
+                        </span>
+                    </div>
+                    <div class="section-body">
+                        <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 20px;">
+                            <!-- Strategies List -->
+                            <div>
+                                <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px;">กลยุทธ์</div>
+                                <div id="strategies-grid" style="display: flex; flex-direction: column; gap: 8px;">
+                                    <div class="empty-state"><span class="empty-icon">⏳</span>Loading…</div>
+                                </div>
+                            </div>
+                            <!-- Trading Conditions -->
+                            <div>
+                                <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px;">เงื่อนไขการเทรด (M5)</div>
+                                <div id="trading-conditions" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:10px">
+                                    <div class="empty-state"><span class="empty-icon">⏳</span>Loading…</div>
+                                </div>
                             </div>
                         </div>
                     </div>
+                </div>
 
-                    <!-- Live Positions -->
-                    <div class="section">
-                        <div class="section-header">
-                            <span class="section-title">
-                                <span class="section-icon">📋</span>พอร์ตที่เปิดอยู่
-                            </span>
-                            <button class="btn btn-sm" onclick="switchTab('positions')">ดูทั้งหมด →</button>
-                        </div>
-                        <div class="tbl-wrap">
-                            <table class="pos-table">
-                                <thead>
-                                    <tr>
-                                        <th>สัญลักษณ์</th>
-                                        <th>ประเภท</th>
-                                        <th>ล็อต</th>
-                                        <th>ราคาเปิด</th>
-                                        <th>ปัจจุบัน</th>
-                                        <th>กำไร/ขาดทุน</th>
-                                        <th></th>
-                                    </tr>
-                                </thead>
-                                <tbody id="positions-body-dash">
-                                    <tr id="no-positions-dash">
-                                        <td colspan="7">
-                                            <div class="empty-state">
-                                                <span class="empty-icon">🗂️</span>ไม่มีพอร์ตที่เปิดอยู่
-                                            </div>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
+                <!-- Live Positions -->
+                <div class="section">
+                    <div class="section-header">
+                        <span class="section-title">
+                            <span class="section-icon">📋</span>พอร์ตที่เปิดอยู่
+                        </span>
+                        <button class="btn btn-sm" onclick="switchTab('positions')">ดูทั้งหมด →</button>
                     </div>
-
-                </div><!-- /dash-grid -->
+                    <div class="tbl-wrap">
+                        <table class="pos-table">
+                            <thead>
+                                <tr>
+                                    <th>สัญลักษณ์</th>
+                                    <th>ประเภท</th>
+                                    <th>ล็อต</th>
+                                    <th>ราคาเปิด</th>
+                                    <th>ปัจจุบัน</th>
+                                    <th>กำไร/ขาดทุน</th>
+                                    <th>SL / TP</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="positions-body-dash">
+                                <tr id="no-positions-dash">
+                                    <td colspan="8">
+                                        <div class="empty-state">
+                                            <span class="empty-icon">🗂️</span>ไม่มีพอร์ตที่เปิดอยู่
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </section><!-- /tab-dashboard -->
 
             <!-- ══ TAB: Manual Trade ════════════════════════════════ -->
@@ -237,11 +255,11 @@
                             <div class="trade-field">
                                 <label class="trade-lbl">คู่สกุลเงิน</label>
                                 <select id="trade-symbol" class="trade-select" onchange="onSymbolChange()">
+                                    <option value="BTCUSD" selected>₿ BTCUSD</option>
                                     <option value="EURUSD">🇪🇺 EURUSD</option>
                                     <option value="GBPUSD">🇬🇧 GBPUSD</option>
                                     <option value="USDJPY">🇯🇵 USDJPY</option>
                                     <option value="XAUUSD">🥇 XAUUSD</option>
-                                    <option value="BTCUSD">₿ BTCUSD</option>
                                     <option value="ETHUSD">Ξ ETHUSD</option>
                                 </select>
                             </div>
@@ -390,6 +408,34 @@
                     </div>
                 </div>
 
+                <!-- Today's Summary Stats (Compact) -->
+                <div class="stats-row stats-compact" id="history-today-stats">
+                    <div class="stat-card stat-card-compact c-orange">
+                        <div class="stat-card-inner">
+                            <div class="stat-content-compact">
+                                <div class="stat-lbl-compact">วันนี้</div>
+                                <div id="today-summary-result" class="stat-val-compact">—</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-card-compact c-green">
+                        <div class="stat-card-inner">
+                            <div class="stat-content-compact">
+                                <div class="stat-lbl-compact">อัตราชนะ</div>
+                                <div id="today-summary-winrate" class="stat-val-compact">—</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="stat-card stat-card-compact c-cyan">
+                        <div class="stat-card-inner">
+                            <div class="stat-content-compact">
+                                <div class="stat-lbl-compact">จำนวน</div>
+                                <div id="today-summary-trades" class="stat-val-compact">0</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Summary KPIs -->
                 <div class="stats-row" id="history-kpis" style="display:none">
                     <div class="stat-card c-cyan">
@@ -446,19 +492,18 @@
                         <table class="history-table">
                             <thead>
                                 <tr>
-                                    <th>เวลา</th>
-                                    <th>เลขที่</th>
-                                    <th>สัญลักษณ์</th>
-                                    <th>ประเภท</th>
-                                    <th>ล็อต</th>
-                                    <th>ราคาเปิด</th>
-                                    <th>ราคาปิด</th>
-                                    <th>กำไร/ขาดทุน</th>
-                                    <th>หมายเหตุ</th>
+                                    <th>Number</th>
+                                    <th>Symbol</th>
+                                    <th>Type</th>
+                                    <th>Lot</th>
+                                    <th>Open</th>
+                                    <th>Close</th>
+                                    <th>P&L</th>
+                                    <th>Note</th>
                                 </tr>
                             </thead>
                             <tbody id="history-tbody">
-                                <tr><td colspan="9"><div class="empty-state"><span class="empty-icon">🗂️</span>Loading…</div></td></tr>
+                                <tr><td colspan="8"><div class="empty-state"><span class="empty-icon">🗂️</span>Loading…</div></td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -606,6 +651,19 @@
                     <div class="section-body" style="padding:0">
                         <div id="ai-log-list" class="ai-log" style="padding:10px 14px">
                             <div class="empty-state"><span class="empty-icon">📋</span>No activity yet</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Thinking Process -->
+                <div class="section">
+                    <div class="section-header">
+                        <span class="section-title"><span class="section-icon">🧠</span>AI Thinking Process</span>
+                        <button class="btn btn-sm" onclick="loadAIThinkingLog()">↺ Refresh</button>
+                    </div>
+                    <div class="section-body" style="padding:0">
+                        <div id="ai-thinking-container" style="padding:8px">
+                            <div class="empty-state"><span class="empty-icon">💭</span>No thinking logs yet</div>
                         </div>
                     </div>
                 </div>

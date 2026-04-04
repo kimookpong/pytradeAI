@@ -14,10 +14,49 @@ let reconnectAttempts = 0;
 let latestPrices = {}; // { BTCUSD: {bid,ask,spread}, ... }
 let aiSettingsCache = []; // latest AI settings from server
 let currentProvider = "minimax"; // active AI provider selection
+let aiThinkingLog = []; // AI reasoning/thinking process log
 const MAX_RECONNECT = 50;
 
 // ─── Constants ───────────────────────────────────────────────
 const SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "BTCUSD", "ETHUSD"];
+
+// ─── LocalStorage Management ──────────────────────────────────
+const StorageKeys = {
+  ACCOUNTS: "pytrade_accounts",
+  AI_SETTINGS: "pytrade_ai_settings",
+  STRATEGY_SETTINGS: "pytrade_strategy_settings",
+  SYSTEM_LOG: "pytrade_system_log",
+  AI_THINKING_LOG: "pytrade_ai_thinking_log",
+  TODAY_TRADES: "pytrade_today_trades",
+};
+
+function storage_get(key, defaultValue = null) {
+  try {
+    const val = localStorage.getItem(key);
+    return val ? JSON.parse(val) : defaultValue;
+  } catch {
+    return defaultValue;
+  }
+}
+
+function storage_set(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (err) {
+    console.warn(`Storage set failed for ${key}:`, err);
+  }
+}
+
+function storage_append_log(key, entry, maxSize = 500) {
+  let log = storage_get(key, []);
+  log = Array.isArray(log) ? log : [];
+  log.push(entry);
+  if (log.length > maxSize) {
+    log = log.slice(-maxSize);
+  }
+  storage_set(key, log);
+  return log;
+}
 
 // ─── DOM helpers ─────────────────────────────────────────────
 const $id = (id) => document.getElementById(id);
@@ -78,13 +117,13 @@ function handleMessage(data) {
       updateSystemButton();
       showToast(
         data.active ? "✅ System activated" : "⏸️ System paused",
-        data.active ? "success" : "info"
+        data.active ? "success" : "info",
       );
       break;
     case "strategy_toggle":
       showToast(
         `${data.symbol}: ${data.enabled ? "ON ✅" : "OFF ⏸️"}`,
-        data.enabled ? "success" : "info"
+        data.enabled ? "success" : "info",
       );
       break;
     case "close_result":
@@ -99,13 +138,16 @@ function handleMessage(data) {
     case "log_entry":
       prependLogEntry(data);
       break;
+    case "ai_thinking":
+      handleAIThinking(data);
+      break;
     case "mt5_connect_result":
       if (data.success) {
         showToast(
           data.simulation_mode
             ? "🔌 Connected (Simulation)"
             : "✅ Connected to MT5 Live",
-          "success"
+          "success",
         );
         updateConnectionStatus(data.connected, data.simulation_mode);
       } else {
@@ -138,6 +180,10 @@ function switchTab(name) {
   // Lazy-load tab content
   if (name === "log") loadSystemLog();
   if (name === "history") loadHistory();
+  if (name === "ai-auto") {
+    loadAILog();
+    loadAIThinkingLog();
+  }
 }
 
 function switchMT5Tab(name) {
@@ -178,7 +224,7 @@ async function loadSystemLog() {
           <td class="log-cat-cell"><span class="log-cat log-cat-${e.category.toLowerCase()}">${e.icon} ${e.category}</span></td>
           <td class="log-message">${escHtml(e.message)}</td>
           <td class="log-detail">${escHtml(e.detail || "")}</td>
-        </tr>`
+        </tr>`,
       )
       .join("");
   } catch {
@@ -216,22 +262,136 @@ function escHtml(str) {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   AI Thinking Log Display
+   ═══════════════════════════════════════════════════════════ */
+
+function handleAIThinking(data) {
+  // Save to memory and localStorage
+  aiThinkingLog.push(data);
+  if (aiThinkingLog.length > 200) {
+    aiThinkingLog = aiThinkingLog.slice(-200);
+  }
+  storage_append_log(StorageKeys.AI_THINKING_LOG, data, 500);
+
+  // Update UI if thinking log panel is visible
+  updateAIThinkingDisplay();
+
+  // Log to console for debugging
+  console.log("🤖 AI Thinking:", data);
+}
+
+function updateAIThinkingDisplay() {
+  const container = $id("ai-thinking-container");
+  if (!container) return;
+
+  const html = aiThinkingLog
+    .slice(-10)
+    .reverse()
+    .map((entry) => {
+      const ts = new Date(entry.timestamp * 1000).toLocaleTimeString();
+      const stageEmoji =
+        {
+          market_analysis: "📊",
+          performance_analysis: "📈",
+          prompt_ready: "✍️",
+          calling_api: "🔄",
+          api_response: "📨",
+          decision: "🎯",
+          trade_decision: "💰",
+          trade_executed: "✅",
+          trade_failed: "❌",
+          analysis_complete: "✔️",
+        }[entry.stage] || "•";
+
+      return `<div class="thinking-entry thinking-${entry.stage}">
+      <span class="thinking-ts">${ts}</span>
+      <span class="thinking-stage">${stageEmoji} ${entry.stage}</span>
+      <span class="thinking-symbol">${entry.symbol}</span>
+      <pre class="thinking-data">${JSON.stringify(entry.data, null, 2)}</pre>
+    </div>`;
+    })
+    .join("");
+
+  container.innerHTML =
+    html || '<div class="empty-state">No AI thinking logs yet</div>';
+}
+
+async function loadAIThinkingLog() {
+  try {
+    const res = await fetch(`${API_BASE}/ai/thinking?limit=50`);
+    const data = await res.json();
+    aiThinkingLog = data.thinking_log || [];
+    // Restore from localStorage if available
+    const stored = storage_get(StorageKeys.AI_THINKING_LOG, []);
+    if (stored && stored.length > aiThinkingLog.length) {
+      aiThinkingLog = stored.slice(-50);
+    }
+    updateAIThinkingDisplay();
+  } catch (err) {
+    console.error("Failed to load AI thinking log:", err);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
    Trade History
    ═══════════════════════════════════════════════════════════ */
+
+function updateTodayHistoryStats(allTrades) {
+  if (!Array.isArray(allTrades)) {
+    allTrades = [];
+  }
+
+  // Filter trades from today only
+  const now = new Date();
+  const todayStart =
+    new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
+  const todayEnd = todayStart + 86400; // 24 hours
+
+  const todayTrades = allTrades.filter(
+    (t) => t.time >= todayStart && t.time < todayEnd,
+  );
+
+  // Calculate today's stats
+  const todayWins = todayTrades.filter((t) => t.profit > 0).length;
+  const todayPnL = todayTrades.reduce((sum, t) => sum + t.profit, 0);
+  const todayWinRate =
+    todayTrades.length > 0
+      ? Math.round((todayWins / todayTrades.length) * 100)
+      : 0;
+
+  // Update DOM
+  const resultEl = $id("today-summary-result");
+  if (resultEl) {
+    resultEl.textContent = `${todayPnL >= 0 ? "+" : ""}$${fmt(todayPnL)}`;
+    resultEl.style.color = todayPnL >= 0 ? "var(--green)" : "var(--red)";
+  }
+
+  const tradesEl = $id("today-summary-trades");
+  if (tradesEl) tradesEl.textContent = todayTrades.length;
+
+  const winrateEl = $id("today-summary-winrate");
+  if (winrateEl) winrateEl.textContent = `${todayWinRate}%`;
+
+  const winsEl = $id("today-summary-wins");
+  if (winsEl) winsEl.textContent = todayWins;
+}
 
 async function loadHistory() {
   const tbody = $id("history-tbody");
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><span class="empty-icon">⏳</span>Loading…</div></td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><span class="empty-icon">⏳</span>Loading…</div></td></tr>`;
 
   const days = $id("history-days")?.value || 30;
   try {
     const res = await fetch(`${API_BASE}/history?days=${days}`);
     const trades = await res.json();
 
+    // Display today's stats first
+    updateTodayHistoryStats(trades);
+
     const chartSection = $id("balance-chart-section");
     if (!Array.isArray(trades) || !trades.length) {
-      tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><span class="empty-icon">🗂️</span>No closed trades in this period</div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><span class="empty-icon">🗂️</span>No closed trades in this period</div></td></tr>`;
       $id("history-kpis").style.display = "none";
       if (chartSection) chartSection.style.display = "none";
       return;
@@ -241,47 +401,80 @@ async function loadHistory() {
     trades.sort((a, b) => b.time - a.time);
 
     // Compute KPIs — profit > 0 is a win (same rule as dashboard)
-    const wins   = trades.filter(t => t.profit > 0).length;
-    const losses = trades.filter(t => t.profit <= 0).length;
+    const wins = trades.filter((t) => t.profit > 0).length;
+    const losses = trades.filter((t) => t.profit <= 0).length;
     const netPnl = trades.reduce((s, t) => s + t.profit, 0);
-    const best   = Math.max(...trades.map(t => t.profit));
-    const winRate = trades.length ? ((wins / trades.length) * 100).toFixed(1) : 0;
+    const best = Math.max(...trades.map((t) => t.profit));
+    const winRate = trades.length
+      ? ((wins / trades.length) * 100).toFixed(1)
+      : 0;
 
-    $id("hist-total").textContent   = trades.length;
+    $id("hist-total").textContent = trades.length;
     $id("hist-winrate").textContent = `${winRate}%`;
-    $id("hist-wins").textContent    = wins;
-    $id("hist-losses").textContent  = losses;
-    $id("hist-pnl").textContent     = `${netPnl >= 0 ? "+" : ""}$${fmt(netPnl)}`;
-    $id("hist-pnl").className       = `stat-val ${netPnl >= 0 ? "positive" : "negative"}`;
-    $id("hist-best").textContent    = `+$${fmt(best)}`;
+    $id("hist-wins").textContent = wins;
+    $id("hist-losses").textContent = losses;
+    $id("hist-pnl").textContent = `${netPnl >= 0 ? "+" : ""}$${fmt(netPnl)}`;
+    $id("hist-pnl").className =
+      `stat-val ${netPnl >= 0 ? "positive" : "negative"}`;
+    $id("hist-best").textContent = `+$${fmt(best)}`;
     $id("history-kpis").style.display = "";
     if (chartSection) {
       chartSection.style.display = "";
       requestAnimationFrame(() => drawBalanceChart(trades));
     }
 
-    tbody.innerHTML = trades.map(t => {
-      const dt = new Date(t.time * 1000);
-      const dateStr = dt.toLocaleDateString() + " " + dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      const pnlClass = t.profit > 0 ? "history-pnl-pos" : "history-pnl-neg";
-      const pnlStr   = `${t.profit >= 0 ? "+" : ""}$${fmt(t.profit)}`;
-      const typeUp   = (t.type || "").toUpperCase();
-      return `
+    tbody.innerHTML = trades
+      .map((t) => {
+        const dt = new Date(t.time * 1000);
+        const dateTimeStr = dt.toLocaleString([], {
+          month: "numeric",
+          day: "numeric",
+          year: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+
+        // Close time (if available)
+        const closeTime = t.close_time || t.time;
+        const dtClose = new Date(closeTime * 1000);
+        const closeDateTimeStr = dtClose.toLocaleString([], {
+          month: "numeric",
+          day: "numeric",
+          year: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+
+        const pnlClass = t.profit > 0 ? "history-pnl-pos" : "history-pnl-neg";
+        const pnlStr = `${t.profit >= 0 ? "+" : ""}$${fmt(t.profit)}`;
+        const typeUp = (t.type || "").toUpperCase();
+
+        const priceOpen = t.price_open ?? t.price ?? "—";
+        const priceClose = t.price_close ?? "—";
+
+        return `
         <tr class="history-row">
-          <td class="history-time">${dateStr}</td>
           <td class="history-ticket">#${t.ticket}</td>
           <td class="history-symbol">${escHtml(t.symbol)}</td>
           <td><span class="type-badge type-badge-${typeUp.toLowerCase()}">${typeUp}</span></td>
-          <td>${t.volume}</td>
-          <td class="history-time">${t.price_open ?? t.price ?? "—"}</td>
-          <td class="history-time">${t.price_close ?? "—"}</td>
+          <td class="history-volume">${t.volume}</td>
+          <td class="history-price-with-time">
+            <div class="history-price">$${priceOpen}</div>
+            <div class="history-time-small">${dateTimeStr}</div>
+          </td>
+          <td class="history-price-with-time">
+            <div class="history-price">$${priceClose}</div>
+            <div class="history-time-small">${closeDateTimeStr}</div>
+          </td>
           <td class="${pnlClass}">${pnlStr}</td>
           <td class="history-comment">${escHtml(t.comment || "")}</td>
         </tr>`;
-    }).join("");
-
+      })
+      .join("");
   } catch {
-    tbody.innerHTML = `<tr><td colspan="9" style="color:var(--red);padding:14px">Failed to load history</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="color:var(--red);padding:14px">Failed to load history</td></tr>`;
   }
 }
 
@@ -293,58 +486,101 @@ function drawBalanceChart(trades) {
 
   let cum = 0;
   const points = [{ time: sorted[0].time, cum: 0 }];
-  for (const t of sorted) { cum += t.profit; points.push({ time: t.time, cum: parseFloat(cum.toFixed(2)) }); }
+  for (const t of sorted) {
+    cum += t.profit;
+    points.push({ time: t.time, cum: parseFloat(cum.toFixed(2)) });
+  }
 
   const W = canvas.clientWidth || canvas.offsetWidth || 800;
   const H = 160;
-  canvas.width = W; canvas.height = H;
+  canvas.width = W;
+  canvas.height = H;
 
   const ctx = canvas.getContext("2d");
   const pad = { t: 16, r: 16, b: 28, l: 58 };
-  const cW = W - pad.l - pad.r, cH = H - pad.t - pad.b;
-  const times = points.map(p => p.time), cums = points.map(p => p.cum);
-  const minT = Math.min(...times), maxT = Math.max(...times);
-  const minV = Math.min(0, ...cums), maxV = Math.max(0, ...cums);
-  const rangeV = maxV - minV || 1, rangeT = maxT - minT || 1;
-  const xOf = t => pad.l + (t - minT) / rangeT * cW;
-  const yOf = v => pad.t + cH - (v - minV) / rangeV * cH;
+  const cW = W - pad.l - pad.r,
+    cH = H - pad.t - pad.b;
+  const times = points.map((p) => p.time),
+    cums = points.map((p) => p.cum);
+  const minT = Math.min(...times),
+    maxT = Math.max(...times);
+  const minV = Math.min(0, ...cums),
+    maxV = Math.max(0, ...cums);
+  const rangeV = maxV - minV || 1,
+    rangeT = maxT - minT || 1;
+  const xOf = (t) => pad.l + ((t - minT) / rangeT) * cW;
+  const yOf = (v) => pad.t + cH - ((v - minV) / rangeV) * cH;
 
   ctx.clearRect(0, 0, W, H);
 
   // Grid lines
   for (let i = 0; i <= 4; i++) {
-    const v = minV + rangeV * i / 4, y = yOf(v);
-    ctx.strokeStyle = "rgba(255,255,255,0.06)"; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
-    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = "#545d6e"; ctx.font = "10px Inter,sans-serif"; ctx.textAlign = "right";
+    const v = minV + (rangeV * i) / 4,
+      y = yOf(v);
+    ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(pad.l, y);
+    ctx.lineTo(W - pad.r, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#545d6e";
+    ctx.font = "10px Inter,sans-serif";
+    ctx.textAlign = "right";
     ctx.fillText(`$${v >= 0 ? "+" : ""}${v.toFixed(0)}`, pad.l - 4, y + 3);
   }
 
   // Zero line when axis spans both sides
   if (minV < 0 && maxV > 0) {
     const y0 = yOf(0);
-    ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
-    ctx.beginPath(); ctx.moveTo(pad.l, y0); ctx.lineTo(W - pad.r, y0); ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(pad.l, y0);
+    ctx.lineTo(W - pad.r, y0);
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
-  const finalVal = cums[cums.length - 1], isPos = finalVal >= 0;
+  const finalVal = cums[cums.length - 1],
+    isPos = finalVal >= 0;
   const lineColor = isPos ? "#22c55e" : "#ef4444";
   const grad = ctx.createLinearGradient(0, pad.t, 0, H - pad.b);
   grad.addColorStop(0, isPos ? "rgba(34,197,94,0.25)" : "rgba(239,68,68,0.25)");
   grad.addColorStop(1, isPos ? "rgba(34,197,94,0.02)" : "rgba(239,68,68,0.02)");
 
   const baseY = yOf(Math.max(minV, 0));
-  ctx.beginPath(); ctx.moveTo(xOf(points[0].time), baseY);
+  ctx.beginPath();
+  ctx.moveTo(xOf(points[0].time), baseY);
   for (const p of points) ctx.lineTo(xOf(p.time), yOf(p.cum));
   ctx.lineTo(xOf(points[points.length - 1].time), baseY);
-  ctx.closePath(); ctx.fillStyle = grad; ctx.fill();
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
 
-  ctx.beginPath(); ctx.strokeStyle = lineColor; ctx.lineWidth = 2; ctx.lineJoin = "round";
-  points.forEach((p, i) => { const x = xOf(p.time), y = yOf(p.cum); i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
+  ctx.beginPath();
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = "round";
+  points.forEach((p, i) => {
+    const x = xOf(p.time),
+      y = yOf(p.cum);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
   ctx.stroke();
 
-  ctx.beginPath(); ctx.arc(xOf(points[points.length - 1].time), yOf(finalVal), 4, 0, Math.PI * 2);
-  ctx.fillStyle = lineColor; ctx.fill();
+  ctx.beginPath();
+  ctx.arc(
+    xOf(points[points.length - 1].time),
+    yOf(finalVal),
+    4,
+    0,
+    Math.PI * 2,
+  );
+  ctx.fillStyle = lineColor;
+  ctx.fill();
 }
 
 function updateDashboard(data) {
@@ -353,7 +589,7 @@ function updateDashboard(data) {
     const balFmt = `$${fmt(data.account.balance)}`;
     const eqFmt = `$${fmt(data.account.equity)}`;
     const profitFmt = `${data.account.profit >= 0 ? "+" : ""}$${fmt(
-      data.account.profit
+      data.account.profit,
     )}`;
 
     animateValue($id("account-balance"), balFmt);
@@ -392,13 +628,15 @@ function updateDashboard(data) {
     updateMT5Badge(data.status.mt5_connected);
     updateConnectionStatus(
       data.status.mt5_connected,
-      data.status.simulation_mode
+      data.status.simulation_mode,
     );
   }
   // Strategies
   if (data.strategies) updateStrategies(data.strategies);
   // Positions
   if (data.positions !== undefined) updatePositions(data.positions);
+  // Update today's stats
+  updateTodayStats(data.positions, data.account);
   // Prices
   if (data.prices) {
     latestPrices = data.prices;
@@ -426,17 +664,17 @@ function updateTickerBar(prices) {
   const inner = $id("ticker-inner");
   if (!inner) return;
 
-  const items = Object.entries(prices)
+  const itemsHtml = Object.entries(prices)
     .map(([sym, p]) => {
       const icon = SYMBOL_ICONS[sym] || sym;
       const digits = sym.includes("JPY")
         ? 3
         : sym.includes("USD") &&
-          !sym.startsWith("BTC") &&
-          !sym.startsWith("ETH") &&
-          !sym.startsWith("XAU")
-        ? 5
-        : 2;
+            !sym.startsWith("BTC") &&
+            !sym.startsWith("ETH") &&
+            !sym.startsWith("XAU")
+          ? 5
+          : 2;
       return `
             <div class="ticker-item" id="tick-${sym}">
                 <span class="tick-icon">${icon}</span>
@@ -447,23 +685,28 @@ function updateTickerBar(prices) {
     })
     .join("");
 
+  // Duplicate items for seamless infinite scroll (repeat items)
+  const duplicatedHtml = itemsHtml + itemsHtml;
+
   // Only rebuild if structure changed
-  if (inner.children.length !== Object.keys(prices).length) {
-    inner.innerHTML = items;
+  if (inner.children.length !== Object.keys(prices).length * 2) {
+    inner.innerHTML = duplicatedHtml;
   } else {
+    // Update prices without rebuilding HTML
     Object.entries(prices).forEach(([sym, p]) => {
-      const el = $id(`tick-${sym}`);
-      if (!el) return;
+      const els = document.querySelectorAll(`#tick-${sym}`);
       const digits = sym.includes("JPY")
         ? 3
         : sym.includes("USD") &&
-          !sym.startsWith("BTC") &&
-          !sym.startsWith("ETH") &&
-          !sym.startsWith("XAU")
-        ? 5
-        : 2;
-      const bidEl = el.querySelector(".tick-bid");
-      if (bidEl) bidEl.textContent = p.bid.toFixed(digits);
+            !sym.startsWith("BTC") &&
+            !sym.startsWith("ETH") &&
+            !sym.startsWith("XAU")
+          ? 5
+          : 2;
+      els.forEach((el) => {
+        const bidEl = el.querySelector(".tick-bid");
+        if (bidEl) bidEl.textContent = p.bid.toFixed(digits);
+      });
     });
   }
 }
@@ -475,8 +718,8 @@ function updateTradePriceDisplay() {
   const digits = sym.includes("JPY")
     ? 3
     : sym.includes("BTC") || sym.includes("ETH") || sym.includes("XAU")
-    ? 2
-    : 5;
+      ? 2
+      : 5;
   $id("trade-bid").textContent = p.bid.toFixed(digits);
   $id("trade-ask").textContent = p.ask.toFixed(digits);
 }
@@ -527,6 +770,95 @@ function updateStrategies(strategies) {
   const dashActive = $id("dash-strategies-active");
   if (dashActive)
     dashActive.textContent = `${activeCount}/${strategies.length}`;
+
+  // Load trading conditions for each symbol
+  loadAllTradingConditions(strategies);
+}
+
+async function loadAllTradingConditions(strategies) {
+  const container = $id("trading-conditions");
+  if (!container) return;
+
+  try {
+    const promises = strategies.map((s) =>
+      fetch(`${API_BASE}/strategies/${s.symbol}/conditions`)
+        .then((r) => r.json())
+        .catch((e) => ({
+          symbol: s.symbol,
+          status: "error",
+          error: e.message,
+        })),
+    );
+
+    const conditions = await Promise.all(promises);
+    container.innerHTML = conditions
+      .map((c) => _buildConditionCard(c))
+      .join("");
+  } catch (err) {
+    console.error("Failed to load trading conditions:", err);
+  }
+}
+
+function _buildConditionCard(cond) {
+  if (cond.status !== "ready") {
+    return `
+      <div class="trading-condition-card">
+        <div class="tc-header">
+          <span class="tc-symbol">${cond.symbol}</span>
+        </div>
+        <div style="font-size:11px; color:var(--text-muted)">⚠️ ${cond.message || "No data"}</div>
+      </div>`;
+  }
+
+  const indicators = cond.technical_indicators;
+  const buy = cond.buy_signal;
+  const sell = cond.sell_signal;
+
+  const buyTriggered = buy.triggered ? "buy" : "neutral";
+  const sellTriggered = sell.triggered ? "sell" : "neutral";
+
+  return `
+    <div class="trading-condition-card">
+      <div class="tc-header">
+        <span class="tc-symbol">${cond.symbol}</span>
+        <span class="tc-price">$${cond.current_price}</span>
+      </div>
+      
+      <div class="tc-indicators">
+        <div class="tc-ind-item">
+          <div class="tc-ind-label">RSI-14</div>
+          <div class="tc-ind-value">${indicators.rsi_14.toFixed(1)}</div>
+        </div>
+        <div class="tc-ind-item">
+          <div class="tc-ind-label">MA 7 / 20</div>
+          <div class="tc-ind-value">${indicators.ma_7.toFixed(5)} / ${indicators.ma_20.toFixed(5)}</div>
+        </div>
+        <div class="tc-ind-item">
+          <div class="tc-ind-label">BB Upper</div>
+          <div class="tc-ind-value">${indicators.bb_upper.toFixed(5)}</div>
+        </div>
+        <div class="tc-ind-item">
+          <div class="tc-ind-label">BB Lower</div>
+          <div class="tc-ind-value">${indicators.bb_lower.toFixed(5)}</div>
+        </div>
+      </div>
+      
+      <div class="tc-signals">
+        <div class="tc-signal-box ${buyTriggered}">
+          🟢 BUY (${buy.score})
+        </div>
+        <div class="tc-signal-box ${sellTriggered}">
+          🔴 SELL (${sell.score})
+        </div>
+      </div>
+      
+      <div class="tc-conditions">
+        <strong style="color:var(--green)">Buy:</strong>
+        ${buy.conditions.map((c) => `<div>${c}</div>`).join("")}
+        <strong style="color:var(--red); margin-top:4px; display:block">Sell:</strong>
+        ${sell.conditions.map((c) => `<div>${c}</div>`).join("")}
+      </div>
+    </div>`;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -541,6 +873,110 @@ function updateInsights(ins) {
   const wk = $id("weakest-action");
   wk.style.color =
     wk.textContent === "Perfect" ? "var(--green)" : "var(--yellow)";
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Today's Summary Tracking
+   ═══════════════════════════════════════════════════════════ */
+
+function getTodayTrades() {
+  const today = new Date().toDateString();
+  let allTrades = storage_get(StorageKeys.TODAY_TRADES, {});
+
+  // Clean old dates
+  const dates = Object.keys(allTrades);
+  dates.forEach((d) => {
+    if (d !== today) delete allTrades[d];
+  });
+
+  if (!allTrades[today]) {
+    allTrades[today] = { trades: [], startBalance: 0, startTime: Date.now() };
+  }
+
+  return (
+    allTrades[today] || { trades: [], startBalance: 0, startTime: Date.now() }
+  );
+}
+
+function saveTodayTrades(trades) {
+  const today = new Date().toDateString();
+  let allTrades = storage_get(StorageKeys.TODAY_TRADES, {});
+  allTrades[today] = trades;
+  storage_set(StorageKeys.TODAY_TRADES, allTrades);
+}
+
+function recordTradeAsToday(tradeResult) {
+  if (!tradeResult || !tradeResult.success) return;
+
+  const today = getTodayTrades();
+  today.trades.push({
+    symbol: tradeResult.symbol,
+    type: tradeResult.type,
+    ticket: tradeResult.ticket,
+    time: Date.now(),
+    result: "pending", // will be updated when closed
+  });
+  saveTodayTrades(today);
+}
+
+async function updateTodayStats(positions, account) {
+  // Fetch today's closed trades from API and calculate stats
+  try {
+    const res = await fetch(`${API_BASE}/history?days=1`);
+    const allTrades = await res.json();
+
+    if (!Array.isArray(allTrades)) {
+      allTrades = [];
+    }
+
+    // Filter trades from today only
+    const now = new Date();
+    const todayStart =
+      new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() /
+      1000;
+    const todayEnd = todayStart + 86400; // 24 hours
+
+    const todayTrades = allTrades.filter(
+      (t) => t.time >= todayStart && t.time < todayEnd,
+    );
+
+    // Calculate today's stats
+    const todayWins = todayTrades.filter((t) => t.profit > 0).length;
+    const todayPnL = todayTrades.reduce((sum, t) => sum + t.profit, 0);
+    const todayWinRate =
+      todayTrades.length > 0
+        ? Math.round((todayWins / todayTrades.length) * 100)
+        : 0;
+
+    // Add open positions P&L
+    let openPnL = 0;
+    if (positions && Array.isArray(positions)) {
+      openPnL = positions.reduce((sum, p) => sum + (p.profit || 0), 0);
+    }
+
+    const totalTodayPnL = todayPnL + openPnL;
+
+    // Update DOM
+    const resultEl = $id("today-result");
+    if (resultEl) {
+      resultEl.textContent = `${totalTodayPnL >= 0 ? "+" : ""}$${fmt(totalTodayPnL)}`;
+      resultEl.style.color = totalTodayPnL >= 0 ? "var(--green)" : "var(--red)";
+    }
+
+    const tradesEl = $id("today-trades");
+    if (tradesEl) tradesEl.textContent = todayTrades.length;
+
+    const winrateEl = $id("today-winrate");
+    if (winrateEl) winrateEl.textContent = todayWinRate;
+  } catch (err) {
+    console.error("Failed to update today stats:", err);
+    // Fallback: show — for error state
+    const resultEl = $id("today-result");
+    if (resultEl) {
+      resultEl.textContent = "—";
+      resultEl.style.color = "var(--text-muted)";
+    }
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -606,6 +1042,7 @@ function updatePositions(positions) {
             <td>${p.price_open}</td>
             <td>${p.price_current}</td>
             <td class="${pc}">${sign}$${p.profit.toFixed(2)}</td>
+            <td style="font-size:10px; color:var(--text-secondary)">${p.sl ? `SL: ${p.sl.toFixed(5)}<br>TP: ${p.tp?.toFixed(5) || "—"}` : "—"}</td>
             <td><button class="btn-close-pos" onclick="closePosition(${
               p.ticket
             })">Close</button></td>
@@ -660,12 +1097,12 @@ function renderSavedAccounts(accounts) {
           a.auto_connect ? "is-default" : ""
         }" id="sa-${encodeURIComponent(a.name)}">
             <div class="sa-info" onclick="fillAccountForm(${a.login}, '${escJs(
-        a.server
-      )}', '${escJs(a.name)}', ${a.auto_connect})">
+              a.server,
+            )}', '${escJs(a.name)}', ${a.auto_connect})">
                 <span class="sa-name">${a.name}</span>
                 <span class="sa-detail">${a.login || "—"} · ${
-        a.server || "Simulation"
-      }</span>
+                  a.server || "Simulation"
+                }</span>
                 ${
                   a.auto_connect
                     ? '<span class="sa-default-badge">★ Default</span>'
@@ -675,8 +1112,8 @@ function renderSavedAccounts(accounts) {
             <div class="sa-actions">
                 <button class="sa-btn sa-btn-connect"
                         onclick="quickConnect(${a.login}, '${escJs(
-        a.server
-      )}', '${escJs(a.name)}')"
+                          a.server,
+                        )}', '${escJs(a.name)}')"
                         title="Connect">🔗</button>
                 <button class="sa-btn sa-btn-default ${
                   a.auto_connect ? "active" : ""
@@ -689,7 +1126,7 @@ function renderSavedAccounts(accounts) {
                         onclick="deleteSavedAccount('${escJs(a.name)}')"
                         title="Delete">🗑</button>
             </div>
-        </div>`
+        </div>`,
     )
     .join("");
 }
@@ -708,7 +1145,7 @@ async function quickConnect(login, server, name) {
   // Fill form then trigger connect — password prompt if missing
   fillAccountForm(login, server, name, false);
   const accounts = await fetch(`${API_BASE}/mt5/saved-accounts`).then((r) =>
-    r.json()
+    r.json(),
   );
   // password lives only on the server — call connect via API directly
   const res = await fetch(`${API_BASE}/mt5/connect`, {
@@ -727,7 +1164,7 @@ async function quickConnect(login, server, name) {
     data.simulation_mode
       ? "🔌 Connected (Simulation)"
       : `✅ Connected: ${name}`,
-    "success"
+    "success",
   );
   closeMT5Panel();
 }
@@ -761,7 +1198,7 @@ async function doSaveAccount() {
 
     showToast(
       `💾 Saved: "${name}"${autoConnect ? " (set as default)" : ""}`,
-      "success"
+      "success",
     );
     loadSavedAccounts();
   } catch (err) {
@@ -776,7 +1213,7 @@ async function deleteSavedAccount(name) {
       `${API_BASE}/mt5/saved-accounts/${encodeURIComponent(name)}`,
       {
         method: "DELETE",
-      }
+      },
     );
     if (!res.ok) throw new Error("Delete failed");
     showToast(`🗑 Deleted: "${name}"`, "info");
@@ -792,7 +1229,7 @@ async function setDefaultAccount(name) {
       `${API_BASE}/mt5/set-default/${encodeURIComponent(name)}`,
       {
         method: "POST",
-      }
+      },
     );
     if (!res.ok) throw new Error("Failed");
     showToast(`★ Default set: "${name}"`, "success");
@@ -833,7 +1270,7 @@ async function doMT5Connect() {
       data.simulation_mode
         ? "🔌 Connected (Simulation)"
         : "✅ Connected to MT5 Live",
-      "success"
+      "success",
     );
     closeMT5Panel();
   } catch (err) {
@@ -1149,8 +1586,8 @@ function renderAISymbolSettingsCard(sym, cfg, analysis) {
         ${sigBadge}
         <label class="toggle-switch" style="margin-left:auto">
           <input type="checkbox" id="ai-sym-${sym}-auto" ${
-    cfg.auto_trade ? "checked" : ""
-  }
+            cfg.auto_trade ? "checked" : ""
+          }
                  onchange="saveAISymbolSettings('${sym}')">
           <span class="toggle-slider"></span>
         </label>
@@ -1180,8 +1617,8 @@ function renderAISymbolSettingsCard(sym, cfg, analysis) {
         <div>
           <label>Max trades</label>
           <input type="number" id="ai-sym-${sym}-max" value="${
-    cfg.max_trades || 1
-  }"
+            cfg.max_trades || 1
+          }"
                  min="1" max="10" step="1" class="form-input"
                  style="width:100%" onchange="saveAISymbolSettings('${sym}')">
         </div>
@@ -1233,7 +1670,7 @@ async function toggleAIMaster() {
     });
     showToast(
       enabled ? "🤖 AI Auto Trade enabled" : "AI Auto Trade disabled",
-      enabled ? "success" : "info"
+      enabled ? "success" : "info",
     );
   } catch {
     showToast("Failed to toggle AI auto trade", "error");
@@ -1256,8 +1693,8 @@ async function analyzeAllSymbols() {
   try {
     await Promise.all(
       SYMBOLS.map((sym) =>
-        fetch(`${API_BASE}/ai/analyze/${sym}`, { method: "POST" })
-      )
+        fetch(`${API_BASE}/ai/analyze/${sym}`, { method: "POST" }),
+      ),
     );
     // Reload analysis and refresh grid
     const res = await fetch(`${API_BASE}/ai/analysis`);
@@ -1284,8 +1721,12 @@ function renderAISymbolsGrid(aiSettings, aiAnalysis) {
     const conf = an ? an.confidence || 0 : 0;
     const reason = an ? an.reason || "" : "No analysis yet";
     const risk = an ? an.risk || "" : "";
-    const logicName = an ? an.logic_name || "Technical Analysis" : "Standby";
-    const ctx = an && an.context ? `RSI:${an.context.rsi14} | SMA5:${an.context.sma5} | Vol:${an.context.volatility_pct}%` : "Waiting for Market Data...";
+    const riskCls =
+      risk === "HIGH"
+        ? "var(--accent-red)"
+        : risk === "MEDIUM"
+          ? "var(--accent-orange)"
+          : "var(--accent-green)";
 
     return `
         <div class="ai-sym-card${cfg.auto_trade ? " has-auto-trade" : ""}">
@@ -1296,12 +1737,12 @@ function renderAISymbolsGrid(aiSettings, aiAnalysis) {
           <div class="ai-sym-analysis">
             <div class="ai-conf-bar">
               <div class="ai-conf-fill" style="width:${conf}%;background:${
-      conf >= 70
-        ? "var(--accent-green)"
-        : conf >= 50
-        ? "var(--accent-orange)"
-        : "var(--accent-red)"
-    }"></div>
+                conf >= 70
+                  ? "var(--accent-green)"
+                  : conf >= 50
+                    ? "var(--accent-orange)"
+                    : "var(--accent-red)"
+              }"></div>
             </div>
             <span style="font-size:11px;color:var(--text-dim)">${conf}% confidence</span>
             ${
@@ -1310,11 +1751,7 @@ function renderAISymbolsGrid(aiSettings, aiAnalysis) {
                 : ""
             }
           </div>
-          <div style="font-size:12px; font-weight:600; color:var(--cyan); margin-top:8px">💡 ${logicName}</div>
           <div class="ai-reason">${reason}</div>
-          <div style="font-size:10px; color:var(--text-muted); background:rgba(255,255,255,0.03); padding:6px; border-radius:4px; margin-top:6px; font-family:monospace">
-            Context: ${ctx}
-          </div>
           <div style="font-size:11px;color:var(--text-dim);margin-top:6px">
             Auto: ${
               cfg.auto_trade
@@ -1387,13 +1824,13 @@ async function loadAILog() {
               }" style="font-size:10px">${entry.signal || ""}</span>
               <span class="ai-log-msg">${
                 entry.action ? entry.action + " — " : ""
-              }[${entry.logic_name || "Technical Fix"}] ${entry.reason || ""}</span>
+              }${entry.reason || ""}</span>
               ${
                 entry.confidence
                   ? `<span style="margin-left:auto;font-size:10px;color:var(--text-dim)">${entry.confidence}%</span>`
                   : ""
               }
-            </div>`
+            </div>`,
       )
       .join("");
   } catch {
@@ -1421,7 +1858,9 @@ async function loadStrategyConfig() {
     const res = await fetch(`${API_BASE}/ai/settings`);
     const settings = await res.json();
 
-    body.innerHTML = settings.map(s => `
+    body.innerHTML = settings
+      .map(
+        (s) => `
       <div class="ai-sym-card" id="strat-card-${s.symbol}" style="margin-bottom:10px">
         <div class="ai-sym-header">
           <span class="ai-sym-name">${s.icon || ""} ${s.symbol}</span>
@@ -1461,18 +1900,21 @@ async function loadStrategyConfig() {
                    onchange="saveStrategyConfig('${s.symbol}')">
           </div>
         </div>
-      </div>`).join("");
+      </div>`,
+      )
+      .join("");
   } catch {
-    body.innerHTML = '<p style="color:var(--accent-red);padding:12px">Failed to load strategy config</p>';
+    body.innerHTML =
+      '<p style="color:var(--accent-red);padding:12px">Failed to load strategy config</p>';
   }
 }
 
 async function saveStrategyConfig(symbol) {
-  const enabled   = $id(`strat-${symbol}-en`)?.checked ?? true;
-  const lot_size  = parseFloat($id(`strat-${symbol}-lot`)?.value) || 0.01;
+  const enabled = $id(`strat-${symbol}-en`)?.checked ?? true;
+  const lot_size = parseFloat($id(`strat-${symbol}-lot`)?.value) || 0.01;
   const sl_points = parseInt($id(`strat-${symbol}-sl`)?.value) || 100;
   const tp_points = parseInt($id(`strat-${symbol}-tp`)?.value) || 200;
-  const cooldown  = parseInt($id(`strat-${symbol}-cd`)?.value) || 60;
+  const cooldown = parseInt($id(`strat-${symbol}-cd`)?.value) || 60;
 
   const lbl = $id(`strat-${symbol}-lbl`);
   if (lbl) lbl.textContent = enabled ? "ON" : "OFF";
@@ -1481,7 +1923,14 @@ async function saveStrategyConfig(symbol) {
     await fetch(`${API_BASE}/ai/settings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol, enabled, lot_size, sl_points, tp_points, cooldown }),
+      body: JSON.stringify({
+        symbol,
+        enabled,
+        lot_size,
+        sl_points,
+        tp_points,
+        cooldown,
+      }),
     });
     showToast(`${symbol} strategy saved`, "success");
   } catch {
@@ -1539,13 +1988,13 @@ function updateSystemButton() {
   const btn = $id("btn-system");
   const text = $id("btn-system-text");
   btn.classList.toggle("off", !systemActive);
-  text.textContent = systemActive ? "SYSTEM ON" : "SYSTEM OFF";
+  text.textContent = systemActive ? "ON" : "OFF";
 }
 
 function updateMT5Badge(connected) {
   const badge = $id("badge-mt5");
   badge.classList.toggle("offline", !connected);
-  $id("badge-mt5-text").textContent = connected ? "MT5 Online" : "MT5 Offline";
+  badge.title = connected ? "MT5 Online" : "MT5 Offline";
 }
 
 function animateValue(el, newVal) {

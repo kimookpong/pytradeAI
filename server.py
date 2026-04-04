@@ -76,18 +76,23 @@ class SaveAccountRequest(BaseModel):
 
 # ─── Saved Accounts Storage ─────────────────────────────────────
 
+# IMPORTANT: Account storage moved to frontend localStorage
+# Backend maintains in-memory cache only for current session
+# Frontend is responsible for persistence
+
 ACCOUNTS_FILE = Path(__file__).parent / "mt5_accounts.json"
 
+# In-memory accounts storage (session-only, no file persistence)
+_saved_accounts: list[dict] = []
+
 def _load_accounts() -> list[dict]:
-    if ACCOUNTS_FILE.exists():
-        try:
-            return json.loads(ACCOUNTS_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            return []
-    return []
+    """Load accounts from in-memory storage (frontend will provide via API)."""
+    return list(_saved_accounts)
 
 def _save_accounts(accounts: list[dict]):
-    ACCOUNTS_FILE.write_text(json.dumps(accounts, indent=2, ensure_ascii=False), encoding="utf-8")
+    """Save accounts to in-memory storage only (no file writes)."""
+    global _saved_accounts
+    _saved_accounts = list(accounts)
 
 
 # ─── System Log ──────────────────────────────────────────────────
@@ -115,6 +120,25 @@ def log_event(category: str, message: str, detail: str = ""):
     }
     _system_log.appendleft(entry)
     return entry
+
+
+def broadcast_ai_thinking(thinking_entry: dict):
+    """Callback to broadcast AI thinking logs to all connected WebSocket clients."""
+    async def send_broadcast():
+        for ws in list(ws_clients):
+            try:
+                await ws.send_json({
+                    "type": "ai_thinking",
+                    **thinking_entry
+                })
+            except Exception:
+                pass
+    
+    # Schedule broadcast on event loop if available
+    try:
+        asyncio.create_task(send_broadcast())
+    except RuntimeError:
+        pass  # No event loop running
 
 
 # ─── Global Instances ───────────────────────────────────────────
@@ -146,6 +170,10 @@ async def lifespan(app: FastAPI):
     else:
         connector.connect()
         log_event("MT5", f"Connected ({'Simulation' if connector.simulation_mode else 'Live'} mode)")
+    
+    # Set up AI thinking callback for WebSocket broadcasts
+    ai_engine.set_thinking_callback(broadcast_ai_thinking)
+    
     asyncio.create_task(engine.run_loop())
     asyncio.create_task(ai_engine.run_loop())
     asyncio.create_task(broadcast_loop())
@@ -206,6 +234,13 @@ async def get_history(days: int = 30):
 @app.get("/api/strategies")
 async def get_strategies():
     return engine.get_strategies()
+
+
+@app.get("/api/strategies/{symbol}/conditions")
+async def get_trading_conditions(symbol: str):
+    """Get detailed trading conditions for a symbol (technical indicators + signals)."""
+    conditions = engine.get_trading_conditions(symbol.upper())
+    return conditions
 
 
 @app.get("/api/status")
@@ -381,6 +416,7 @@ async def place_trade(req: PlaceOrderRequest):
         sl=req.sl,
         tp=req.tp,
         comment=req.comment or "Manual",
+        timeframe="M5",
     )
     log_event("TRADE",
               f"{'✅' if result.success else '❌'} Manual {req.order_type.upper()} {req.volume} {req.symbol.upper()}",
@@ -484,6 +520,20 @@ async def get_ai_log():
     return {"log": ai_engine.get_analysis_log()}
 
 
+@app.get("/api/ai/thinking")
+async def get_ai_thinking(limit: int = 100):
+    """Get AI thinking process logs (for debugging/display)."""
+    return {"thinking_log": ai_engine.get_thinking_log(limit)}
+
+
+@app.post("/api/ai/thinking/clear")
+async def clear_ai_thinking():
+    """Clear AI thinking logs."""
+    ai_engine.clear_thinking_log()
+    log_event("AI", "Thinking logs cleared")
+    return {"status": "cleared"}
+
+
 @app.get("/api/log")
 async def get_system_log():
     """Full system activity log (all categories)."""
@@ -554,7 +604,8 @@ async def handle_ws_command(ws: WebSocket, msg: dict):
         sl = float(msg.get("sl", 0.0))
         tp = float(msg.get("tp", 0.0))
         comment = msg.get("comment", "Manual")
-        result = connector.place_order(symbol, order_type, volume, sl, tp, comment)
+        timeframe = msg.get("timeframe", "M5")
+        result = connector.place_order(symbol, order_type, volume, sl, tp, comment, timeframe)
         log_event("TRADE",
                   f"{'✅' if result.success else '❌'} Manual {order_type} {volume} {symbol}",
                   result.message)
@@ -616,6 +667,7 @@ def build_realtime_payload() -> dict:
         },
         "ai_analysis": ai_engine.get_last_analysis(),
         "ai_auto_trade": ai_engine.settings.get("auto_trade_enabled", False),
+        "ai_thinking_count": len(ai_engine.get_thinking_log(1)),  # Quick indicator
     }
 
 

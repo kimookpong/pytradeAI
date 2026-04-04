@@ -45,7 +45,11 @@ class Position:
     profit: float = 0.0
     sl: float = 0.0
     tp: float = 0.0
+    sl_points: float = 0.0  # Original SL distance in pips (for profit trigger shifting)
     time: int = 0
+    timeframe: str = "M5"  # M5 default
+    min_profit: float = 0.0  # Minimum profit to close position
+    sl_shifted: bool = False  # Whether SL has been shifted to breakeven + gap
     comment: str = ""
 
 
@@ -65,21 +69,22 @@ class HistoryDeal:
     price_open: float = 0.0
     price_close: float = 0.0
     profit: float = 0.0
-    time: int = 0
+    time: int = 0  # open time
+    close_time: int = 0  # close time
     comment: str = ""
 
 
 class MT5Connector:
     """Manages connection and trading operations with MT5 terminal."""
 
-    # Symbol configurations
+    # Symbol configurations with volume limits (min/step/max lots, for MT5 compatibility)
     SYMBOLS = {
-        "BTCUSD": {"digits": 2, "base_price": 67500.0, "spread": 50.0, "pip_value": 1.0},
-        "XAUUSD": {"digits": 2, "base_price": 2180.0, "spread": 0.30, "pip_value": 0.01},
-        "USDJPY": {"digits": 3, "base_price": 151.500, "spread": 0.015, "pip_value": 0.001},
-        "ETHUSD": {"digits": 2, "base_price": 3450.0, "spread": 15.0, "pip_value": 1.0},
-        "EURUSD": {"digits": 5, "base_price": 1.08500, "spread": 0.00012, "pip_value": 0.00001},
-        "GBPUSD": {"digits": 5, "base_price": 1.26800, "spread": 0.00015, "pip_value": 0.00001},
+        "BTCUSD": {"digits": 2, "base_price": 67500.0, "spread": 50.0, "pip_value": 1.0, "min_volume": 0.001, "step_volume": 0.001, "max_volume": 100.0},
+        "XAUUSD": {"digits": 2, "base_price": 2180.0, "spread": 0.30, "pip_value": 0.01, "min_volume": 0.01, "step_volume": 0.01, "max_volume": 1000.0},
+        "USDJPY": {"digits": 3, "base_price": 151.500, "spread": 0.015, "pip_value": 0.001, "min_volume": 0.01, "step_volume": 0.01, "max_volume": 1000.0},
+        "ETHUSD": {"digits": 2, "base_price": 3450.0, "spread": 15.0, "pip_value": 1.0, "min_volume": 0.1, "step_volume": 0.01, "max_volume": 1000.0},
+        "EURUSD": {"digits": 5, "base_price": 1.08500, "spread": 0.00012, "pip_value": 0.00001, "min_volume": 0.01, "step_volume": 0.01, "max_volume": 1000.0},
+        "GBPUSD": {"digits": 5, "base_price": 1.26800, "spread": 0.00015, "pip_value": 0.00001, "min_volume": 0.01, "step_volume": 0.01, "max_volume": 1000.0},
     }
 
     def __init__(self):
@@ -259,9 +264,52 @@ class MT5Connector:
             "time": tick.time,
         }
 
+    def validate_volume(self, symbol: str, volume: float) -> tuple:
+        """Validate and adjust volume against broker limits for a symbol.
+        
+        Returns:
+            tuple: (validated_volume, is_valid, message)
+        """
+        if symbol not in self.SYMBOLS:
+            return volume, False, f"Symbol {symbol} not found"
+        
+        sym_config = self.SYMBOLS[symbol]
+        min_vol = sym_config.get("min_volume", 0.01)
+        step_vol = sym_config.get("step_volume", 0.01)
+        max_vol = sym_config.get("max_volume", 1000.0)
+        
+        # Check minimum volume
+        if volume < min_vol:
+            return volume, False, f"Volume {volume} below minimum {min_vol} for {symbol}"
+        
+        # Check maximum volume
+        if volume > max_vol:
+            return volume, False, f"Volume {volume} exceeds maximum {max_vol} for {symbol}"
+        
+        # Round to valid step increments
+        rounded_volume = round(volume / step_vol) * step_vol
+        rounded_volume = round(rounded_volume, 8)  # Avoid floating point precision issues
+        
+        if abs(rounded_volume - volume) > 1e-6:
+            return rounded_volume, True, f"Volume adjusted from {volume} to {rounded_volume} ({symbol})"
+        
+        return volume, True, "Volume valid"
+
     def place_order(self, symbol: str, order_type: str, volume: float,
-                    sl: float = 0.0, tp: float = 0.0, comment: str = "") -> TradeResult:
-        """Place a market order."""
+                    sl: float = 0.0, tp: float = 0.0, comment: str = "", timeframe: str = "M5", min_profit: float = 0.0, sl_points: float = 0.0) -> TradeResult:
+        """Place a market order. Timeframe defaults to M5. Min profit in dollars. SL points stores original SL distance for breakeven shifting."""
+        # Validate volume against broker limits
+        validated_volume, is_valid, message = self.validate_volume(symbol, volume)
+        if not is_valid:
+            return TradeResult(
+                success=False,
+                message=f"Order failed: {message}",
+                data={"symbol": symbol, "order_type": order_type, "attempted_volume": volume}
+            )
+        
+        # Use validated volume
+        volume = validated_volume
+        
         if self.simulation_mode:
             self._update_sim_prices()
             price = self._sim_prices.get(symbol, 0)
@@ -285,7 +333,11 @@ class MT5Connector:
                 profit=0.0,
                 sl=sl,
                 tp=tp,
+                sl_points=sl_points,
                 time=int(time.time()),
+                timeframe=timeframe,
+                min_profit=min_profit,
+                sl_shifted=False,
                 comment=comment or "Auto-Trade",
             )
             self._positions.append(pos)
@@ -330,10 +382,75 @@ class MT5Connector:
         return TradeResult(success=True, ticket=result.order, message=f"Order executed: {order_type} {volume} {symbol}")
 
     def close_position(self, ticket: int) -> TradeResult:
-        """Close an open position by ticket."""
+        """
+        Close an open position by ticket.
+        M5 timeframe: 
+        - Before 5min: Can close if profit >= min_profit OR profit >= 50% TP
+        - After 5min: Can close ONLY if proper exit signal (RSI overbought/oversold OR near TP) + profit confirmation
+        Other timeframes: can close after 1 minute if profit >= min_profit.
+        """
+        current_time = int(time.time())
+        
         if self.simulation_mode:
             for i, p in enumerate(self._positions):
                 if p.ticket == ticket:
+                    time_elapsed = current_time - p.time
+                    is_m5 = p.timeframe == "M5"
+                    min_hold_seconds = 300 if is_m5 else 60  # 5 min for M5, 1 min for others
+                    
+                    # Check if profit trigger is hit
+                    can_close_by_profit = False
+                    if p.min_profit > 0 and abs(p.profit) >= p.min_profit:
+                        can_close_by_profit = True
+                        
+                        # Shift SL to lock in gains: entry ± sl_points (equal to original risk)
+                        if not p.sl_shifted and p.sl_points > 0:
+                            pip_value = self.SYMBOLS.get(p.symbol, {}).get("pip_value", 0.01)
+                            if p.type == 0:  # BUY: shift SL up to entry + sl_points
+                                new_sl = round(p.price_open + p.sl_points * pip_value, 5)
+                            else:  # SELL: shift SL down to entry - sl_points
+                                new_sl = round(p.price_open - p.sl_points * pip_value, 5)
+                            
+                            p.sl = new_sl
+                            p.sl_shifted = True
+                    
+                    # Check if M5: can close early if profit hits ~50% of target
+                    can_close_by_tp_trigger = False
+                    if is_m5 and p.tp > 0:
+                        # Calculate target profit: distance from entry to TP
+                        target_profit_pips = abs(p.tp - p.price_open)
+                        trigger_threshold = target_profit_pips * 0.5  # 50% of target
+                        
+                        # Check if current profit exceeds trigger
+                        if abs(p.profit) >= trigger_threshold:
+                            can_close_by_tp_trigger = True
+                    
+                    # BEFORE 5 min: Allow close if: profit trigger OR TP trigger
+                    if time_elapsed < min_hold_seconds:
+                        if not can_close_by_profit and not can_close_by_tp_trigger:
+                            remaining = min_hold_seconds - time_elapsed
+                            if is_m5:
+                                min_profit_hint = f" | Min ${p.min_profit}" if p.min_profit > 0 else ""
+                                return TradeResult(
+                                    success=False,
+                                    message=f"M5: Wait for strategy signal. Lockout {remaining}s.{min_profit_hint}"
+                                )
+                            else:
+                                min_profit_hint = f" | Min ${p.min_profit}" if p.min_profit > 0 else ""
+                                return TradeResult(
+                                    success=False, 
+                                    message=f"Cannot close yet. Wait {remaining}s (1min lockout){min_profit_hint}"
+                                )
+                    
+                    # AFTER 5 min: Require proper exit signal (RSI overbought/oversold + profit confirmation)
+                    if time_elapsed >= min_hold_seconds:
+                        exit_signal_valid = self._check_exit_signal(p)
+                        if not exit_signal_valid:
+                            return TradeResult(
+                                success=False,
+                                message=f"M5: Waiting for proper exit signal (RSI/Price confirmation). Profit: {p.profit:.2f}"
+                            )
+                    
                     # Record in history
                     deal = HistoryDeal(
                         ticket=p.ticket,
@@ -343,7 +460,8 @@ class MT5Connector:
                         price_open=p.price_open,
                         price_close=p.price_current,
                         profit=p.profit,
-                        time=int(time.time()),
+                        time=p.time,  # open time
+                        close_time=int(time.time()),  # close time
                         comment="Closed",
                     )
                     self._history.append(deal)
@@ -359,6 +477,62 @@ class MT5Connector:
             position = positions[0]
         if position is None:
             return TradeResult(success=False, message=f"Position {ticket} not found")
+
+        # Check timeframe restrictions and profit trigger
+        time_elapsed = current_time - position.time
+        min_hold_seconds = 300 if position.timeframe == "M5" else 60
+        
+        # Check if profit trigger is hit (can close early if profit meets minimum)
+        can_close_by_profit = False
+        if position.min_profit > 0 and abs(position.profit) >= position.min_profit:
+            can_close_by_profit = True
+            
+            # Shift SL to lock in gains: entry ± sl_points (equal to original risk)
+            if not position.sl_shifted and position.sl_points > 0:
+                pip_value = self.SYMBOLS.get(position.symbol, {}).get("pip_value", 0.01)
+                if position.type == 0:  # BUY: shift SL up to entry + sl_points
+                    new_sl = round(position.price_open + position.sl_points * pip_value, 5)
+                else:  # SELL: shift SL down to entry - sl_points
+                    new_sl = round(position.price_open - position.sl_points * pip_value, 5)
+                
+                # Send position modify request
+                broker_sym = self._broker_map.get(position.symbol, position.symbol)
+                modify_request = {
+                    "action": mt5.TRADE_ACTION_SLTP,
+                    "position": ticket,
+                    "sl": new_sl,
+                    "tp": position.tp,
+                }
+                modify_result = mt5.order_send(modify_request)
+                if modify_result and modify_result.retcode == mt5.TRADE_RETCODE_DONE:
+                    position.sl = new_sl
+                    position.sl_shifted = True
+        
+        # BEFORE 5 min: Allow close if: profit trigger
+        if time_elapsed < min_hold_seconds:
+            if not can_close_by_profit:
+                remaining = min_hold_seconds - time_elapsed
+                if position.timeframe == "M5":
+                    min_profit_hint = f" | Min ${position.min_profit}" if position.min_profit > 0 else ""
+                    return TradeResult(
+                        success=False,
+                        message=f"M5: Wait for strategy signal. Lockout {remaining}s.{min_profit_hint}"
+                    )
+                else:
+                    min_profit_hint = f" | Min ${position.min_profit}" if position.min_profit > 0 else ""
+                    return TradeResult(
+                        success=False, 
+                        message=f"Cannot close yet. Wait {remaining}s (1min lockout){min_profit_hint}"
+                    )
+        
+        # AFTER 5 min: Require proper exit signal (RSI overbought/oversold + profit confirmation)
+        if time_elapsed >= min_hold_seconds:
+            exit_signal_valid = self._check_exit_signal(position)
+            if not exit_signal_valid:
+                return TradeResult(
+                    success=False,
+                    message=f"M5: Waiting for proper exit signal (RSI/Price confirmation). Profit: {position.profit:.2f}"
+                )
 
         close_type = mt5.ORDER_TYPE_SELL if position.type == 0 else mt5.ORDER_TYPE_BUY
         price_info = mt5.symbol_info_tick(position.symbol)
@@ -398,6 +572,7 @@ class MT5Connector:
                     "price_close": round(d.price_close, 5),
                     "profit":      round(d.profit, 2),
                     "time":        d.time,
+                    "close_time":  d.close_time,
                     "comment":     d.comment,
                 }
                 for d in self._history
@@ -439,12 +614,45 @@ class MT5Connector:
                 "price_open":  round(inn.price, 5) if inn else 0.0,
                 "price_close": round(out.price, 5),
                 "profit":      round(out.profit, 2),
-                "time":        out.time,
+                "time":        inn.time if inn else out.time,  # open time from IN deal
+                "close_time":  out.time,  # close time from OUT deal
                 "comment":     out.comment if hasattr(out, "comment") else "",
             })
         return result
 
-    # ─── Simulation Helpers ─────────────────────────────────────────
+    def _check_exit_signal(self, position: Position) -> bool:
+        """
+        Check if position has valid exit signal (proper exit point according to strategies).
+        For M5 after 5 minutes: requires RSI overbought/oversold OR price near TP + minimum profit.
+        
+        Returns: True if exit is allowed, False if waiting for better signal.
+        """
+        # Must have at least some profit to exit after 5 min
+        if position.profit <= 0:
+            return False
+        
+        # For now, accept exit if:
+        # 1. Profit >= 50% of TP distance (halfway target reached)
+        # 2. Price is very close to TP (within 10% of distance)
+        # 3. Profit >= $10 (minimum buffer for good exit)
+        
+        if position.tp > 0:
+            target_profit_pips = abs(position.tp - position.price_open)
+            trigger_threshold = target_profit_pips * 0.5  # 50% of target
+            
+            if abs(position.profit) >= trigger_threshold:
+                return True
+            
+            # Check if price is close to TP (within 10% of distance)
+            distance_to_tp = abs(position.tp - position.price_current)
+            if distance_to_tp < target_profit_pips * 0.1:  # Within 10% of TP
+                return True
+        
+        # Accept if profit is substantial (at least $10)
+        if position.profit >= 10.0:
+            return True
+        
+        return False
 
     def _update_sim_prices(self):
         """Update simulated prices with realistic random walk."""
@@ -500,6 +708,11 @@ class MT5Connector:
 
             # Simulate close price from open price ± profit direction
             price_close = round(price + (abs(profit) / 100.0) * (1 if profit > 0 else -1), self.SYMBOLS[symbol]["digits"])
+            
+            # Generate open and close times (close time is after open time)
+            open_time = now - random.randint(3600, 30 * 86400)
+            close_time = open_time + random.randint(60, 7200)  # Close 1-120 min after open
+            
             self._history.append(HistoryDeal(
                 ticket=90000 + i,
                 symbol=symbol,
@@ -508,7 +721,8 @@ class MT5Connector:
                 price_open=round(price, self.SYMBOLS[symbol]["digits"]),
                 price_close=price_close,
                 profit=profit,
-                time=now - random.randint(3600, 30 * 86400),
+                time=open_time,  # open time
+                close_time=close_time,  # close time
                 comment="Auto-Trade",
             ))
 

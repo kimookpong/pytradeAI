@@ -40,25 +40,15 @@ DEFAULT_SETTINGS = {
 
 
 def load_ai_settings() -> dict:
-    if SETTINGS_FILE.exists():
-        try:
-            stored = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-            # Merge with defaults to handle missing keys
-            merged = {**DEFAULT_SETTINGS, **stored}
-            for sym, defaults in DEFAULT_SETTINGS["symbols"].items():
-                stored_sym = stored.get("symbols", {}).get(sym, {})
-                merged["symbols"][sym] = {**defaults, **stored_sym}
-            return merged
-        except Exception:
-            pass
+    """Load AI settings from defaults (file-based persistence disabled - use localStorage)."""
+    # Always return defaults - frontend manages persistence via localStorage
     return {k: v for k, v in DEFAULT_SETTINGS.items()}
 
 
 def save_ai_settings(settings: dict):
-    SETTINGS_FILE.write_text(
-        json.dumps(settings, indent=2, ensure_ascii=False),
-        encoding="utf-8"
-    )
+    """Save AI settings (currently no-op - frontend manages persistence via localStorage)."""
+    # Skip file writing - all persistence handled by frontend localStorage
+    pass
 
 
 # ─── AI Engine ──────────────────────────────────────────────────
@@ -73,11 +63,13 @@ class AIEngine:
         self._last_analysis: dict[str, dict] = {}
         self._last_trade_time: dict[str, float] = {}
         self._analysis_log: list[dict] = []
+        self._thinking_log: list[dict] = []  # Detailed AI reasoning log
         self._running = False
         self._cooldown = 120
         self._log = log_callback or (lambda *a, **kw: None)
         # Performance context cache: symbol -> (timestamp, stats_dict)
         self._perf_cache: dict[str, tuple[float, dict]] = {}
+        self._on_thinking_update = None  # Callback for frontend broadcasts
 
     # ─── AI mode check (used by TradingEngine) ─────────────────
 
@@ -87,6 +79,26 @@ class AIEngine:
             self.settings.get("auto_trade_enabled", False) and
             self.settings["symbols"].get(symbol, {}).get("auto_trade", False)
         )
+
+    def set_thinking_callback(self, callback):
+        """Set callback for AI thinking updates (for WebSocket broadcasting)."""
+        self._on_thinking_update = callback
+
+    def _log_thinking(self, symbol: str, stage: str, data: dict):
+        """Log AI thinking process for frontend display."""
+        entry = {
+            "timestamp": int(time.time()),
+            "symbol": symbol,
+            "stage": stage,
+            "data": data,
+        }
+        self._thinking_log.append(entry)
+        # Keep last 200 thinking entries
+        if len(self._thinking_log) > 200:
+            self._thinking_log = self._thinking_log[-200:]
+        # Notify frontend via callback
+        if self._on_thinking_update:
+            self._on_thinking_update(entry)
 
     # ─── Public: settings ──────────────────────────────────────
 
@@ -122,6 +134,14 @@ class AIEngine:
 
     def get_analysis_log(self) -> list:
         return list(reversed(self._analysis_log[-50:]))
+
+    def get_thinking_log(self, limit: int = 100) -> list:
+        """Get the AI thinking logs (for debugging/display)."""
+        return list(reversed(self._thinking_log[-limit:]))
+
+    def clear_thinking_log(self):
+        """Clear thinking logs."""
+        self._thinking_log.clear()
 
     # ─── Price data ────────────────────────────────────────────
 
@@ -342,9 +362,12 @@ Respond with ONLY valid JSON (no markdown, no explanation):
         Run AI analysis for a symbol.
         Returns analysis dict with signal, confidence, reason, risk.
         """
+        # Stage 1: Market Context
         ctx = self._build_market_context(symbol)
+        self._log_thinking(symbol, "market_analysis", ctx)
+        
         if not ctx or ctx.get("bars_available", 0) < 5:
-            return {
+            result = {
                 "symbol": symbol,
                 "signal": "HOLD",
                 "confidence": 0,
@@ -357,15 +380,31 @@ Respond with ONLY valid JSON (no markdown, no explanation):
                 "timestamp": int(time.time()),
                 "error": "not_enough_data",
             }
+            self._log_thinking(symbol, "analysis_complete", {"error": "not_enough_data"})
+            return result
 
+        # Stage 2: Performance Context
+        perf = self._get_perf_context(symbol)
+        self._log_thinking(symbol, "performance_analysis", perf)
+
+        # Stage 3: Prompt Building
         provider = self.settings.get("provider", "minimax")
         prompt   = self._build_prompt(symbol, ctx)
+        self._log_thinking(symbol, "prompt_ready", {
+            "provider": provider,
+            "prompt_preview": prompt[:200] + "..." if len(prompt) > 200 else prompt
+        })
 
+        # Stage 4: API Call & Response
         try:
+            self._log_thinking(symbol, "calling_api", {"provider": provider})
+            
             if provider == "gemini":
                 raw = self._call_gemini(prompt)
             else:
                 raw = self._call_minimax(prompt)
+
+            self._log_thinking(symbol, "api_response", {"response_preview": raw[:150]})
 
             parsed = self._parse_ai_response(raw)
             result = {
@@ -381,7 +420,18 @@ Respond with ONLY valid JSON (no markdown, no explanation):
                 "timestamp": int(time.time()),
                 "error": None,
             }
+            
+            # Log decision
+            self._log_thinking(symbol, "decision", {
+                "signal": result["signal"],
+                "confidence": result["confidence"],
+                "risk": result["risk"],
+                "logic_name": result["logic_name"],
+                "reason": result["reason"],
+            })
+            
         except Exception as e:
+            self._log_thinking(symbol, "api_error", {"error": str(e)[:100]})
             result = {
                 "symbol": symbol,
                 "signal": "HOLD",
@@ -400,6 +450,8 @@ Respond with ONLY valid JSON (no markdown, no explanation):
         self._analysis_log.append({**result, "context": None})  # no context in log
         if len(self._analysis_log) > 100:
             self._analysis_log = self._analysis_log[-100:]
+        
+        self._log_thinking(symbol, "analysis_complete", {"status": "success"})
         return result
 
     # ─── Auto-trade ────────────────────────────────────────────
@@ -411,39 +463,82 @@ Respond with ONLY valid JSON (no markdown, no explanation):
         Returns order result dict or None.
         """
         if not self.settings.get("auto_trade_enabled"):
+            self._log_thinking(symbol, "auto_trade_check", {"status": "auto_trade_disabled"})
             return None
 
         sym_cfg = self.settings["symbols"].get(symbol, {})
         if not sym_cfg.get("auto_trade"):
+            self._log_thinking(symbol, "auto_trade_check", {"status": "symbol_auto_trade_disabled"})
             return None
 
         signal     = analysis.get("signal", "HOLD")
         confidence = analysis.get("confidence", 0)
         risk       = analysis.get("risk", "HIGH")
 
+        # Log trading decision process
+        trade_check = {
+            "signal": signal,
+            "confidence": confidence,
+            "risk": risk,
+            "checks": {}
+        }
+
         if signal == "HOLD":
+            trade_check["checks"]["hold_signal"] = "REJECTED: signal is HOLD"
+            self._log_thinking(symbol, "trade_decision", trade_check)
             return None
+        
+        trade_check["checks"]["hold_signal"] = "✓ BUY or SELL signal"
+
         if confidence < 60:
+            trade_check["checks"]["confidence"] = f"REJECTED: {confidence}% < 60%"
+            self._log_thinking(symbol, "trade_decision", trade_check)
             return None
+        
+        trade_check["checks"]["confidence"] = f"✓ {confidence}% >= 60%"
+
         if risk == "HIGH":
+            trade_check["checks"]["risk"] = "REJECTED: risk level HIGH"
+            self._log_thinking(symbol, "trade_decision", trade_check)
             return None
+        
+        trade_check["checks"]["risk"] = f"✓ risk level {risk}"
 
         # Cooldown check
         last = self._last_trade_time.get(symbol, 0)
-        if time.time() - last < self._cooldown:
+        cooldown_remaining = self._cooldown - (time.time() - last)
+        if cooldown_remaining > 0:
+            trade_check["checks"]["cooldown"] = f"REJECTED: {int(cooldown_remaining)}s remaining"
+            self._log_thinking(symbol, "trade_decision", trade_check)
             return None
+        
+        trade_check["checks"]["cooldown"] = "✓ cooldown expired"
 
         # Check max open trades per symbol
         positions = self.connector.get_positions() or []
         sym_positions = [p for p in positions if p.get("symbol") == symbol]
         max_trades = sym_cfg.get("max_trades", 1)
         if len(sym_positions) >= max_trades:
+            trade_check["checks"]["max_trades"] = f"REJECTED: {len(sym_positions)}/{max_trades} max reached"
+            self._log_thinking(symbol, "trade_decision", trade_check)
             return None
+        
+        trade_check["checks"]["max_trades"] = f"✓ {len(sym_positions)}/{max_trades} open"
 
         # Place order
         lot    = sym_cfg.get("lot_size", 0.01)
         sl_pts = sym_cfg.get("sl_points", 50)
         tp_pts = sym_cfg.get("tp_points", 80)
+
+        trade_check["status"] = "EXECUTING"
+        trade_check["order_params"] = {
+            "symbol": symbol,
+            "action": signal,
+            "lot": lot,
+            "sl_pts": sl_pts,
+            "tp_pts": tp_pts
+        }
+        self._log_thinking(symbol, "trade_decision", trade_check)
 
         result = self.connector.place_order(
             symbol=symbol,
@@ -452,6 +547,9 @@ Respond with ONLY valid JSON (no markdown, no explanation):
             sl=float(sl_pts),
             tp=float(tp_pts),
             comment=f"AI:{analysis.get('provider','?')}:{confidence}%",
+            timeframe="M5",
+            min_profit=0.0,  # AI trades use default, no min_profit trigger
+            sl_points=0.0,   # AI trades use default, no SL shifting
         )
 
         if result.success:
@@ -461,6 +559,11 @@ Respond with ONLY valid JSON (no markdown, no explanation):
                 f"✅ AI {signal} {symbol} | {analysis.get('provider','?')} {confidence}%",
                 f"Ticket #{result.ticket} | Lot {lot} | Risk {analysis.get('risk','?')} | {analysis.get('reason','')[:80]}",
             )
+            self._log_thinking(symbol, "trade_executed", {
+                "ticket": result.ticket,
+                "action": signal,
+                "message": result.message
+            })
             log_entry = {
                 "type": "auto_trade",
                 "symbol": symbol,
@@ -471,6 +574,10 @@ Respond with ONLY valid JSON (no markdown, no explanation):
                 "timestamp": int(time.time()),
             }
             self._analysis_log.append(log_entry)
+        else:
+            self._log_thinking(symbol, "trade_failed", {
+                "error": result.message
+            })
 
         return {
             "success": result.success,

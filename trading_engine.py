@@ -14,24 +14,30 @@ from typing import Optional
 
 
 class TradingEngine:
-    """Core auto-trading engine with strategy management."""
+    """Core auto-trading engine with strategy management.
+    Timeframe: M5 (5-minute) bars for all technical analysis and order entry/exit.
+    """
 
     STRATEGIES = {
         "BTCUSD": {
             "name": "Bitcoin Momentum",
-            "enabled": False,
+            "enabled": True,
             "lot_size": 0.01,
-            "sl_points": 500,
-            "tp_points": 800,
+            "sl_points": 800,  # Wider SL to reduce whipsaw (was 500)
+            "tp_points": 1200,  # Realistic target (was 800)
+            "min_profit": 50.0,
+            "timeframe": "M5",
             "icon": "₿",
             "color": "#f7931a",
         },
         "XAUUSD": {
             "name": "Gold Scalper",
-            "enabled": False,
+            "enabled": True,
             "lot_size": 0.05,
             "sl_points": 100,
             "tp_points": 150,
+            "min_profit": 10.0,
+            "timeframe": "M5",
             "icon": "⚜️",
             "color": "#ffd700",
         },
@@ -41,15 +47,19 @@ class TradingEngine:
             "lot_size": 0.1,
             "sl_points": 30,
             "tp_points": 50,
+            "min_profit": 5.0,
+            "timeframe": "M5",
             "icon": "¥",
             "color": "#00d4aa",
         },
         "ETHUSD": {
             "name": "Ethereum Swing",
-            "enabled": False,
-            "lot_size": 0.01,
-            "sl_points": 300,
-            "tp_points": 500,
+            "enabled": True,
+            "lot_size": 0.1,
+            "sl_points": 500,  # Wider SL to reduce whipsaw (was 300)
+            "tp_points": 750,  # Realistic target (was 500)
+            "min_profit": 30.0,
+            "timeframe": "M5",
             "icon": "Ξ",
             "color": "#627eea",
         },
@@ -59,6 +69,8 @@ class TradingEngine:
             "lot_size": 0.1,
             "sl_points": 20,
             "tp_points": 35,
+            "min_profit": 8.0,
+            "timeframe": "M5",
             "icon": "€",
             "color": "#4fc3f7",
         },
@@ -68,6 +80,8 @@ class TradingEngine:
             "lot_size": 0.1,
             "sl_points": 25,
             "tp_points": 40,
+            "min_profit": 10.0,
+            "timeframe": "M5",
             "icon": "£",
             "color": "#ab47bc",
         },
@@ -144,6 +158,7 @@ class TradingEngine:
                 "lot_size": config["lot_size"],
                 "icon": config["icon"],
                 "color": config["color"],
+                "min_profit": config["min_profit"],
             }
             for symbol, config in self.STRATEGIES.items()
         ]
@@ -236,6 +251,9 @@ class TradingEngine:
                         sl=sl,
                         tp=tp,
                         comment=f"AI-{config['name'][:10]}",
+                        timeframe="M5",
+                        min_profit=config["min_profit"],
+                        sl_points=config["sl_points"],
                     )
 
                     if result.success:
@@ -267,7 +285,15 @@ class TradingEngine:
                                     print(f"🔄 Closed {symbol} position: {result.message}")
 
     def _calculate_signal(self, symbol: str) -> str:
-        """Calculate trading signal using technical indicators."""
+        """
+        Calculate trading signal using technical indicators with stricter confirmation.
+        
+        Key improvements:
+        - More conservative RSI thresholds (shifted -5 points)
+        - SELL requires MA confirmation (no solo Bollinger Band entries)
+        - Symbol-specific rules for high-volatility pairs (ETHUSD, BTCUSD)
+        - Require matching trend before entering
+        """
         prices = self._price_history[symbol]
 
         # RSI (14 periods)
@@ -285,39 +311,188 @@ class TradingEngine:
 
         current_price = prices[-1]
 
-        # Signal logic
+        # Symbol-specific thresholds for high-volatility pairs
+        is_high_vol = symbol in ["ETHUSD", "BTCUSD"]
+        rsi_oversold = 20 if is_high_vol else 25  # Stricter for volatility
+        rsi_weak_buy = 30 if is_high_vol else 35
+        rsi_overbought = 80 if is_high_vol else 75  # Stricter for volatility
+        rsi_weak_sell = 70 if is_high_vol else 65
+
+        # Signal logic with stricter confirmation
         buy_signals = 0
         sell_signals = 0
+        has_buy_trend = ma_fast > ma_slow  # Uptrend
+        has_sell_trend = ma_fast < ma_slow  # Downtrend
 
-        # RSI signals
-        if rsi < 30:
+        # RSI signals (more conservative thresholds)
+        if rsi < rsi_oversold:
             buy_signals += 2
-        elif rsi < 40:
+        elif rsi < rsi_weak_buy:
             buy_signals += 1
-        elif rsi > 70:
+        
+        if rsi > rsi_overbought:
             sell_signals += 2
-        elif rsi > 60:
+        elif rsi > rsi_weak_sell:
             sell_signals += 1
 
-        # MA crossover
-        if ma_fast > ma_slow:
+        # MA crossover (confirms trend)
+        if has_buy_trend:
             buy_signals += 1
-        elif ma_fast < ma_slow:
+        elif has_sell_trend:
             sell_signals += 1
 
-        # Bollinger Band signals
+        # Bollinger Band signals (with trend confirmation)
         if current_price <= lower_band:
-            buy_signals += 2
-        elif current_price >= upper_band:
-            sell_signals += 2
+            # Require uptrend or near-neutral
+            if has_buy_trend or (not has_sell_trend):
+                buy_signals += 2
+            else:
+                buy_signals += 1
+        
+        if current_price >= upper_band:
+            # Require downtrend or near-neutral PLUS RSI > 60
+            if (has_sell_trend or not has_buy_trend) and rsi > 60:
+                sell_signals += 2
+            else:
+                sell_signals += 1
 
-        # Decision
-        if buy_signals >= 3 and sell_signals < 2:
+        # **CRITICAL**: BUY requires confirmed uptrend + strong signal
+        if buy_signals >= 3 and sell_signals < 2 and has_buy_trend:
             return "BUY"
-        elif sell_signals >= 3 and buy_signals < 2:
+        
+        # **CRITICAL**: SELL requires confirmed downtrend + MA signal + strong RSI
+        # Don't enter SELL on Bollinger Bands alone — too many false breakouts
+        if sell_signals >= 3 and buy_signals < 2 and has_sell_trend and rsi > 60:
             return "SELL"
 
         return "HOLD"
+
+    def get_trading_conditions(self, symbol: str) -> dict:
+        """Get current trading conditions for a symbol - technical analysis + entry/exit rules."""
+        prices = self._price_history.get(symbol, [])
+        
+        if len(prices) < 20:
+            return {
+                "symbol": symbol,
+                "status": "insufficient_data",
+                "message": f"Need 20 bars, have {len(prices)}",
+            }
+
+        # Technical indicators
+        rsi = self._calc_rsi(prices, 14)
+        ma_fast = sum(prices[-7:]) / 7
+        ma_slow = sum(prices[-20:]) / 20
+        
+        ma_20 = sum(prices[-20:]) / 20
+        std = (sum((p - ma_20) ** 2 for p in prices[-20:]) / 20) ** 0.5
+        upper_band = ma_20 + 2 * std
+        lower_band = ma_20 - 2 * std
+        
+        current_price = prices[-1]
+        
+        # Symbol-specific thresholds (same as in _calculate_signal)
+        is_high_vol = symbol in ["ETHUSD", "BTCUSD"]
+        rsi_oversold = 20 if is_high_vol else 25
+        rsi_weak_buy = 30 if is_high_vol else 35
+        rsi_overbought = 80 if is_high_vol else 75
+        rsi_weak_sell = 70 if is_high_vol else 65
+        
+        # Trend direction
+        has_buy_trend = ma_fast > ma_slow
+        has_sell_trend = ma_fast < ma_slow
+        
+        # Count signals with new stricter logic
+        buy_signals = 0
+        sell_signals = 0
+        buy_conditions = []
+        sell_conditions = []
+        
+        # RSI analysis (more conservative thresholds)
+        if rsi < rsi_oversold:
+            buy_signals += 2
+            buy_conditions.append(f"🔵 RSI = {rsi:.1f} (oversold)")
+        elif rsi < rsi_weak_buy:
+            buy_signals += 1
+            buy_conditions.append(f"🔵 RSI = {rsi:.1f} (weak buy)")
+        
+        if rsi > rsi_overbought:
+            sell_signals += 2
+            sell_conditions.append(f"🔴 RSI = {rsi:.1f} (overbought)")
+        elif rsi > rsi_weak_sell:
+            sell_signals += 1
+            sell_conditions.append(f"🔴 RSI = {rsi:.1f} (weak sell)")
+        
+        # MA crossover (trend confirmation)
+        if has_buy_trend:
+            buy_signals += 1
+            buy_conditions.append(f"🔵 UPTREND: MA7 ({ma_fast:.5f}) > MA20 ({ma_slow:.5f})")
+        elif has_sell_trend:
+            sell_signals += 1
+            sell_conditions.append(f"🔴 DOWNTREND: MA7 ({ma_fast:.5f}) < MA20 ({ma_slow:.5f})")
+        else:
+            buy_conditions.append(f"→ NEUTRAL: MA7 ≈ MA20")
+        
+        # Bollinger Bands (with trend confirmation requirement)
+        if current_price <= lower_band:
+            if has_buy_trend or (not has_sell_trend):
+                buy_signals += 2
+                buy_conditions.append(f"🔵 BREAKOUT: Price ({current_price:.5f}) ≤ Lower Band ({lower_band:.5f})")
+            else:
+                buy_signals += 1
+                buy_conditions.append(f"🟡 BB Support: Price near Lower Band (weak signal)")
+        
+        if current_price >= upper_band:
+            # CRITICAL: Require downtrend + strong RSI for SELL Bollinger Band signal
+            if (has_sell_trend or not has_buy_trend) and rsi > 60:
+                sell_signals += 2
+                sell_conditions.append(f"🔴 BREAKOUT: Price ({current_price:.5f}) ≥ Upper Band ({upper_band:.5f})")
+            else:
+                sell_signals += 1
+                sell_conditions.append(f"🟡 BB Resistance: Price near Upper Band (weak signal)")
+        else:
+            if not (current_price <= lower_band):
+                buy_conditions.append(f"→ Price ({current_price:.5f}) within BB range")
+        
+        # Strategy settings
+        cfg = self.STRATEGIES.get(symbol, {})
+        
+        # Apply New Stricter Logic to Trading Signal Display
+        # BUY requires: 3+ signals + downtrend filtered + uptrend confirmation
+        buy_triggered = buy_signals >= 3 and sell_signals < 2 and has_buy_trend
+        
+        # SELL requires: 3+ signals + uptrend filtered + downtrend confirmation + strong RSI
+        sell_triggered = sell_signals >= 3 and buy_signals < 2 and has_sell_trend and rsi > 60
+        
+        return {
+            "symbol": symbol,
+            "status": "ready",
+            "current_price": round(current_price, 5),
+            "technical_indicators": {
+                "rsi_14": round(rsi, 2),
+                "ma_7": round(ma_fast, 5),
+                "ma_20": round(ma_slow, 5),
+                "bb_upper": round(upper_band, 5),
+                "bb_lower": round(lower_band, 5),
+                "bb_middle": round(ma_20, 5),
+            },
+            "buy_signal": {
+                "score": buy_signals,
+                "triggered": buy_triggered,
+                "conditions": buy_conditions,
+            },
+            "sell_signal": {
+                "score": sell_signals,
+                "triggered": sell_triggered,
+                "conditions": sell_conditions,
+            },
+            "entry_exit": {
+                "cooldown_seconds": self._trade_cooldown,
+                "lot_size": cfg.get("lot_size", 0.01),
+                "stop_loss_points": cfg.get("sl_points", 0),
+                "take_profit_points": cfg.get("tp_points", 0),
+                "position_exists": any(p["symbol"] == symbol for p in self.connector.get_positions()),
+            }
+        }
 
     def _calc_rsi(self, prices: list[float], period: int = 14) -> float:
         """Calculate RSI."""

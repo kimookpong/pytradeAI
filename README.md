@@ -1,95 +1,370 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white" />
-  <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" />
-  <img src="https://img.shields.io/badge/MetaTrader5-4A90D9?style=for-the-badge&logo=metatrader5&logoColor=white" />
-  <img src="https://img.shields.io/badge/AI-MiniMax%20%7C%20Gemini-8B5CF6?style=for-the-badge" />
+<div align="center">
+
+# 🤖 pytradeAI
+
+**ระบบเทรดอัตโนมัติระดับมืออาชีพที่บูรณาการกับ MetaTrader 5**
+
+<p>
+  <img src="https://img.shields.io/badge/Python-3.9+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.9+" />
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/MetaTrader5-4A90D9?style=flat-square&logo=metatrader5&logoColor=white" alt="MetaTrader 5" />
+  <img src="https://img.shields.io/badge/AI-Gemini%20%7C%20MiniMax-8B5CF6?style=flat-square" alt="AI Models" />
 </p>
 
-<h1 align="center">🤖 pytradeAI</h1>
+**[คุณสมบัติ](#คุณสมบัติ) • [สถาปัตยกรรม](#สถาปัตยกรรม) • [การติดตั้ง](#การติดตั้ง) • [คู่มือการใช้งาน](#คู่มือการใช้งาน)**
 
-<p align="center">
-  <strong>ระบบเทรดอัตโนมัติ (Automated Trading) เชื่อมต่อ MetaTrader 5 พร้อมระบบ AI วิเคราะห์ ทบทวน สร้างกลยุทธ์ และเทรดอัตโนมัติ</strong>
-</p>
+</div>
 
 ---
 
-## 📌 กระบวนการทำงานรวม (Core Process & Concept)
+## 📖 ภาพรวม
 
-โปรเจกต์ pytradeAI ถูกออกแบบมาเพื่อให้ทำงานเป็นระบบเทรดอัจฉริยะที่ไม่ได้มีแค่เงื่อนไขตายตัว แต่สามารถเรียนรู้และวิเคราะห์สภาวะตลาดได้ โดยมีหลักการทำงานสำคัญ 3 ส่วนดังนี้:
-
-### 1. ระบบ Auto Trade ตาม Strategies เดิม
-กระบวนการพื้นฐานของระบบจะเริ่มจากการ **อิงการ auto trade ตาม strategies ที่เปิดเปิดใช้านไว้** เช่น การตั้งค่า Indicator RSI, Moving Average (MA) และ Bollinger Bands (BB) โดยระบบเทรดยังคงตรวจจับสัญญาณ (Signals) ตลอดเวลา และจะทำการออกออเดอร์ทันทีที่เข้าเงื่อนไขของแต่ละกลยุทธ์ที่ผู้ใช้ยอมรับ
-
-### 2. กระบวนการประเมินและทบทวนของ AI (AI Analysis & Context Retention)
-เมื่อมีการเทรดผ่านไป AI จะมีหน้าที่เข้าตรวจสอบและ **วิเคราะห์ข้อมูลจากการเทรดที่ผ่านมา (Past Trades)** ว่าเข้าเงื่อนไขแล้วกำไรหรือขาดทุนเพราะเหตุใด:
-- **ปรับปรุง Strategies ใหม่:** AI จะประเมินจังหวะการเข้าออกที่ผิดพลาด เพื่อเสนอแนวทางปรับปรุงค่าพารามิเตอร์ หรือ Strategies ชุดใหม่ให้สอดคล้องกับสภาพตลาด
-- **เก็บข้อมูล Context:** ข้อมูลการวิเคราะห์ สถิติ และเหตุผลเชิงลึกทั้งหมด จะถูกจัดเก็บเป็น Context ไว้ในระบบอย่างเป็นลำดับ
-- **แสดงผลแบบ Real-time:** Context และความเห็นของ AI จะถูกนำมาแสดงผลผ่าน Dashboard (หมวด AI Insights) ให้คุณรับทราบสถานะการเรียนรู้ของระบบอย่างโปร่งใส
-
-### 3. หากให้ AI ลงมือเทรดเอง (AI Auto Trade Enabled)
-ในกรณีที่มีการอนุญาตให้ **"AI trade เองได้"** จะมีกระบวนการแสดงผลที่ชัดเจนขึ้นและไม่ทำงานเป็นกล่องดำ (Black Box):
-- ระบบจะทำการ **ระบุอย่างชัดเจนว่า AI กำลังหยิบ Context หรือปัจจัยตลาดข้อไหนขึ้นมาวิเคราะห์อยู่ในขณะนั้น**
-- ระบุให้เห็นว่า **กำลังใช้ Strategies หรือตรรกะแบบไหนในการเข้าเทรดครั้งนี้**
-- สถานะต่างๆ จำนวนเปอร์เซ็นต์ความมั่นใจความเสี่ยง และเหตุผลในการวางออเดอร์ จะถูก Log และแจ้งผ่านหน้า UI โดยตรง เพื่อให้การเทรดอัตโนมัติโดย AI ตรวจสอบย้อนหลังได้ 100%
+pytradeAI เป็นแพลตฟอร์มเทรดอัตโนมัติขั้นสูงที่ผสมผสานพลังของปัญญาเทียม (AI) กับการวิเคราะห์ทางเทคนิค เพื่อมอบแนวทางการเทรดที่พัฒนาได้และมีความชาญฉลาดทางการเงิน ระบบได้รับการออกแบบให้ทำงานแบบไม่ต้องแนวทาง (Black Box) และให้ความโปร่งใสเต็มที่เกี่ยวกับการตัดสินใจการเทรดของมัน
 
 ---
 
-## 🚀 ฟีเจอร์เด่นอื่นๆ (Additional Features)
+## ✨ คุณสมบัติ
 
-- ⚡ **Manual Trade & Dashboard:** ส่งคำสั่งเทรดพร้อมกันผ่านหน้าเว็บ UI มืดแบบ Premium ได้ทันที ข้อมูลและพอร์ตขยับแบบ Real-time ยิงผ่าน WebSocket
-- 🧠 **Smart Logic & Rankings:** จัดอันดับคู่เงิน (Symbols) เช่น XAUUSD, BTCUSD, EURUSD ว่าคู่ไหนน่าลงทุนโดยประเมินจาก Volatility และเปรียบเทียบสเปรด (Spread)
-- 🛡️ **Risk Management:** จำกัด Lot size สูงสุด, มี Max positions กั้นไม่ให้ AI เปิดไม้เยอะเกินเบอร์ พร้อม Stop Loss ครอบคลุมทุกการเทรด
-- 🧪 **Simulation Mode:** มีโหมดจำลองสำหรับนักพัฒนาที่ใช้ macOS / Linux ช่วยให้เขียนโค้ดและดู UI ต่อได้ โดยไม่ต้องรัน MT5 บน Windows
+### 🎯 เอกลักษณ์หลัก
+
+- **การเทรดอัตโนมัติตามกลยุทธ์**: ระบบติดตามคำสั่งออกโดยอิงตามตัวบ่งชี้ทางเทคนิค (RSI, Moving Average, Bollinger Bands)
+- **กรรมวิธีวิเคราะห์อัจฉริยะ**: AI ศึกษาประวัติการเทรดและเสนอแนวทางปรับปรุงกลยุทธ์แบบต่อเนื่อง
+- **แดชบอร์ดตามเวลาจริง**: ติดตามตำแหน่ง P&L และสถิติการเทรดผ่านอินเตอร์เฟซเว็บสมัยใหม่
+- **การจัดการความเสี่ยงระดับมืออาชีพ**: ข้อจำกัด Volume Stop Loss และการควบคุมความเสี่ยงเต็มรูปแบบ
+- **โหมดจำลองขั้นสูง**: เหมาะสำหรับการพัฒนาบน macOS/Linux โดยไม่ต้องมี MetaTrader 5
+- **ความโปร่งใสเต็มที่**: ข้อมูลให้เหตุผลการตัดสินใจการเทรดพร้อมใช้งานเสมอ
 
 ---
 
-## ⚙️ การติดตั้งและใช้งาน (Quick Start)
+## 🏗️ สถาปัตยกรรม
 
-### Requirement
-- Python 3.9+ ขึ้นไป
-- โปรแกรม MetaTrader 5 (รันบน Windows), หากไม่มีสามารถรันแบบจำลองบัญชีม๊อคได้
+```
+┌─────────────────────────────────────────────────────────┐
+│                   Frontend (Web UI)                      │
+│                  (HTML/CSS/JavaScript)                   │
+└────────────────────────┬────────────────────────────────┘
+                         │ WebSocket
+┌────────────────────────┴────────────────────────────────┐
+│            FastAPI Backend Server                        │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │  server.py - API Endpoints & WebSocket Manager   │   │
+│  ├──────────────────────────────────────────────────┤   │
+│  │  trading_engine.py - Core Trading Logic & Rules  │   │
+│  │  ai_engine.py - AI Analysis & Strategy Review    │   │
+│  │  smart_logic.py - Symbol Ranking & Analysis      │   │
+│  └──────────────────────────────────────────────────┘   │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────┴────────────────────────────────┐
+│          MT5Connector Layer                              │
+│  (Dual Mode: Live MT5 / Simulation)                     │
+└────────────────────────┬────────────────────────────────┘
+                         │
+        ┌────────────────┴────────────────┐
+        │                                 │
+┌───────▼────────┐              ┌────────▼──────┐
+│ MetaTrader 5   │              │  Simulation   │
+│ (Windows)      │              │  Mode         │
+└────────────────┘              └───────────────┘
+```
+
+---
+
+## 🚀 ระบบการทำงานหลัก
+
+### 1. การเทรดอัตโนมัติตามกลยุทธ์ (Strategy-Based Auto Trading)
+
+ระบบทำการตรวจสอบสัญญาณการเทรด (Trading Signals) อย่างต่อเนื่องบนคู่เงินที่เลือก เช่น BTCUSD, XAUUSD, ETHUSD โดยใช้ตัวบ่งชี้ทางเทคนิค:
+
+- **RSI (Relative Strength Index)**: ตรวจสอบสถานะซื้อมากเกินไป/ขายน้อยของตลาด
+- **Moving Averages (MA7/MA20)**: ระบุทิศทางแนวโน้มระยะสั้นและยาว
+- **Bollinger Bands**: ตรวจจับความผันผวนและจุดหักตัวของราคา
+
+เมื่อตรงตามเงื่อนไขของกลยุทธ์ใด ระบบจะทำการออกออเดอร์ทันที
+
+### 2. การวิเคราะห์และการเรียนรู้ของ AI (AI Analysis & Learning)
+
+หลังจากการเทรดแต่ละครั้ง AI จะ:
+
+- **ประเมินบริบท (Assess Context)**: วิเคราะห์สภาพตลาดในเวลานั้นอย่างละเอียด
+- **ศึกษาผลลัพธ์ (Analyze Outcomes)**: ตรวจสอบว่าทำไมการเทรดจึงผ่านหรือล้มเหลว
+- **เสนอปรับปรุง (Propose Improvements)**: แนะนำการปรับเปลี่ยนพารามิเตอร์กลยุทธ์เพื่อให้ดีขึ้น
+- **จัดเก็บข้อมูล (Store Context)**: บันทึกการวิเคราะห์ทั้งหมดเพื่อการอ้างอิงในอนาคต
+
+### 3. งานวิเคราะห์การเทรด AI ขั้นสูง (Advanced AI Trading Analysis)
+
+เมื่อเปิดใช้ "AI Trade Mode" ระบบจะ:
+
+- ระบุอย่างชัดเจนว่าสัญญาณใด ใช้กลยุทธ์ไหน และเหตุผลการออกออเดอร์
+- แสดงผลระดับความมั่นใจและการวัดความเสี่ยง
+- บันทึก Log ทั้งหมดไว้สำหรับการตรวจสอบย้อนหลัง 100%
+
+---
+
+## 📋 คู่มือการใช้งาน
+
+### ข้อกำหนดระบบ
+
+| ส่วนประกอบ   | ข้อกำหนดต่ำสุด      | ขอแนะนำ                |
+| ------------ | ------------------- | ---------------------- |
+| Python       | 3.9+                | 3.11+                  |
+| RAM          | 4 GB                | 8 GB                   |
+| CPU          | Core i5             | Core i7+               |
+| OS           | Windows/macOS/Linux | Windows 10/11 Pro      |
+| MetaTrader 5 | ออปชันอล (Live)     | ขอแนะนำ (Live Trading) |
+
+### ขั้นตอนการติดตั้ง
+
+#### 1. โคลนโปรเจกต์
 
 ```bash
-# 1. Clone โปรเจกต์
 git clone https://github.com/your-username/pytradeAI.git
 cd pytradeAI
+```
 
-# 2. สร้าง Virtual Environment
+#### 2. สร้าง Virtual Environment
+
+```bash
 python -m venv .venv
+```
 
-# 3. เปิดใช้งาน Environment
-# ของระบบ Windows:
+#### 3. เปิดใช้งาน Environment
+
+**สำหรับ Windows:**
+
+```bash
 .venv\Scripts\activate
-# ของระบบ Linux/macOS:
-# source .venv/bin/activate
+```
 
-# 4. ติดตั้ง Libraries
+**สำหรับ Linux/macOS:**
+
+```bash
+source .venv/bin/activate
+```
+
+#### 4. ติดตั้ง Dependencies
+
+```bash
 pip install -r requirements.txt
+```
 
-# 5. รันเซิร์ฟเวอร์
+#### 5. ตั้งค่า Configuration (เลือกที่เหมาะสม)
+
+**สำหรับเทรดสดกับ MT5:**
+
+```bash
+# แก้ไข ai_settings.json หรือ .env ด้วยข้อมูล API Keys
+nano ai_settings.json
+```
+
+**สำหรับโหมดจำลอง:**
+
+```bash
+# ไม่ต้องอะไร ระบบจะใช้โหมด Simulation โดยอัตโนมัติ
+```
+
+#### 6. รันเซิร์ฟเวอร์
+
+```bash
 python -m uvicorn server:app --host 0.0.0.0 --port 8888 --reload
 ```
-เปิดเบราว์เซอร์ไปที่: `http://localhost:8888` เพื่อใช้งาน Dashboard
+
+เปิดเบราว์เซอร์ไปที่: **http://localhost:8888**
 
 ---
 
-## 🔒 หลักการ Push Git (ความปลอดภัยและการข้ามไฟล์)
+## 🛡️ ความปลอดภัย & Git Best Practices
 
-ในการทำงานกับระบบที่มีการเชื่อมต่อพอร์ตการเงินแท้ ทักษะด้าน **Git Security** สำคัญที่สุด มีโครงสร้างข้อมูลหลายแบบที่มีลักษณะเฉพาะ **ไม่จำเป็นและไม่ควรต้องนำขึ้นไป Commit** บน Git เด็ดขาด ดังนี้:
+### ⚠️ เนื้อหาที่ต้องป้องกันจาก Git
 
-### ❌ ข้อมูลอะไรบ้างที่ไม่ควร Commit ?
+ในการทำงานกับระบบเทรดที่มีข้อมูลการเงิน **ความปลอดภัย** ถือเป็นลำดับความสำคัญสูงสุด ต้องป้องกันไฟล์เหล่านี้จากการ Commit:
 
-1. **ข้อมูล Credentials การลงทุนของคุณ**
-   - ไฟล์ **`mt5_accounts.json`**: ถูกระบบสร้างขึ้นเพื่อเก็บเลข Account, ทูลและ Password สำหรับแวะเข้าเซิร์ฟเวอร์ Exness หรือ Broker ต่างๆ
-   - ไฟล์ **`ai_settings.json`** / **`.env`**: ใช้เก็บรหัส API Keys พิเศษเช่นของ Gemini, MiniMax ที่ผูกบัตรเครดิต
-   *(หากไฟล์นี้ติดไปกับ Git และหลุดสู่สาธารณะ อาจส่งผลให้โดนขโมยพอร์ต หรือถูกดึง API Key ไปใช้จนเสียเงินได้)*
+#### 1️⃣ ข้อมูล Credentials & API Keys
 
-2. **ไฟล์ Environment ที่หนักเครื่อง**
-   - โฟลเดอร์ **`.venv/`** หรือ **`env/`**: ชุดของ Python Library มีขนาดใหญ่มาก ๆ แต่ละคนที่โหลดโปรเจกต์ไปสามารถสร้างขึ้นเองในคอมพิวเตอร์เขาได้ผ่าน `requirements.txt`
-   - โฟลเดอร์โฟลเดอร์รอยต่อ **`__pycache__/`** และไฟล์กลุ่ม **`*.pyc`**: ไฟล์ Compiled code ย่อยที่สร้างขึ้นโดย Python ตอนทำงาน ไม่จำเป็นต้อง Commit
+| ไฟล์                | เหตุผล                                   | การแก้ไข               |
+| ------------------- | ---------------------------------------- | ---------------------- |
+| `mt5_accounts.json` | เก็บ Account, Password สำหรับ MT5 Broker | เพิ่มลงใน `.gitignore` |
+| `ai_settings.json`  | เก็บ API Keys (Gemini, MiniMax, ฯลฯ)     | เพิ่มลงใน `.gitignore` |
+| `.env`              | ตัวแปร Environment สำหรับระบบ            | เพิ่มลงใน `.gitignore` |
 
-3. **ไฟล์จำพวก Log และ Cache เครื่องส่วนตัว**
-   - รูปภาพหรือประวัติการทำงานชั่วคราว **`*.log`**
-   - ไฟล์ตั้งค่า OS ชั่วคราว เช่น **`.DS_Store`** (จาก macOS)
+**⚠️ ความเสี่ยง**: หากเกิดการรั่วไหลอาจส่งผลให้:
 
-> **วิธีแก้ไขที่ถูกหลัก:** ควรสร้างและระบุไฟล์เหล่านี้รวมอยู่ในไฟล์ `.gitignore` ของคุณ เพื่อให้ Git ปฏิเสธที่จะตรวจจับและยกไฟล์สำคัญพวกนี้ไปบันทึกลง History ของระบบ!
+- บัญชี Trading ถูกบุกรุก
+- API Keys ถูกอาจารปฏิบัติเพื่อ DDoS หรือขุดเชื่อ
+- บัตรเครดิต/บัญชีธนาคารมีความเสี่ยง
+
+#### 2️⃣ ไฟล์ Environment ที่หนักเครื่อง
+
+| ไฟล์/โฟลเดอร์        | ขนาด       | หมายเหตุ                                |
+| -------------------- | ---------- | --------------------------------------- |
+| `.venv/` หรือ `env/` | 200-500 MB | ใช้ `requirements.txt` โหลดใหม่ได้      |
+| `__pycache__/`       | 10-50 MB   | สร้างขึ้นอัตโนมัติ ไม่จำเป็นต้อง Commit |
+| `*.pyc`              | ต่างกัน    | Compiled Python อัตโนมัติ               |
+
+#### 3️⃣ ไฟล์ชั่นคราว & Logs
+
+```
+*.log           # Log files
+.DS_Store       # macOS system files
+Thumbs.db       # Windows cache
+*.tmp
+__pycache__/
+```
+
+### ✅ การตั้งค่า .gitignore ที่ถูกวิธี
+
+```gitignore
+# Environment & Dependencies
+.venv/
+env/
+venv/
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+
+# Credentials & Sensitive Info
+mt5_accounts.json
+ai_settings.json
+.env
+.env.local
+*.key
+*.pem
+
+# Temporary Files
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+```
+
+### 🔐 วิธีการตรวจสอบก่อน Push
+
+```bash
+# ไม่ให้ Commit ไฟล์ที่อยู่ใน .gitignore
+git check-ignore -v <filename>
+
+# ดูว่าไฟล์ไหนกำลังจะติดขึ้น Git
+git status
+
+# Review ก่อน commit
+git diff --cached
+```
+
+---
+
+## 📁 โครงสร้างโปรเจกต์
+
+```
+pytradeAI/
+├── server.py                 # FastAPI Main Server & WebSocket
+├── trading_engine.py         # Core Trading Engine & Strategies
+├── ai_engine.py              # AI Analysis & Recommendations
+├── ai_insights.py            # AI Insights Processing
+├── smart_logic.py            # Symbol Ranking & Analysis
+├── mt5_connector.py          # MT5 Integration Layer
+│
+├── static/
+│   ├── index.html            # Main Dashboard UI
+│   ├── app.js                # Frontend Logic
+│   └── styles.css            # Styling
+│
+├── requirements.txt          # Python Dependencies
+├── README.md                 # This file
+├── .gitignore               # Git Security Configuration
+│
+├── mt5_accounts.json        # ⚠️ (DO NOT COMMIT)
+├── ai_settings.json         # ⚠️ (DO NOT COMMIT)
+└── .venv/                   # ⚠️ (DO NOT COMMIT)
+```
+
+---
+
+## 📊 ตัวแปรและการตั้งค่า
+
+### File: `ai_settings.json`
+
+```json
+{
+  "gemini_api_key": "YOUR_GEMINI_API_KEY",
+  "minimax_api_key": "YOUR_MINIMAX_API_KEY",
+  "ai_trade_enabled": false,
+  "max_positions": 5,
+  "max_daily_loss_usd": 500
+}
+```
+
+### File: `mt5_accounts.json`
+
+```json
+{
+  "accounts": [
+    {
+      "login": 123456789,
+      "password": "your_password",
+      "server": "Exness-MT5",
+      "is_demo": false
+    }
+  ]
+}
+```
+
+---
+
+## 🐛 การแก้ไขปัญหา
+
+| ปัญหา                                                | สาเหตุ                       | การแก้ไข                           |
+| ---------------------------------------------------- | ---------------------------- | ---------------------------------- |
+| `ModuleNotFoundError: No module named 'MetaTrader5'` | MT5 ไม่ติดตั้งบน macOS/Linux | ใช้ Simulation Mode โดยอัตโนมัติ   |
+| `Connection refused on port 8888`                    | Port ถูกใช้งาน               | เปลี่ยน port: `--port 9000`        |
+| `WebSocket connection failed`                        | Firewall บล็อก               | ปลดปล่อย port หรือตั้งค่า Firewall |
+| `Volume validation error`                            | ค่า Lot size ไม่ถูกต้อง      | ตรวจสอบ Broker minimum/maximum     |
+
+---
+
+## 📞 ติดต่อและการสนับสนุน
+
+- **GitHub Issues**: รายงานบัก หรือขอฟีเจอร์ใหม่
+- **Documentation**: ดูเพิ่มเติมใน Wiki หรือ Docs Folder
+- **Community**: เข้าร่วมการสนทนาและแชร์ประสบการณ์
+
+---
+
+## 📄 ใบอนุญาต
+
+โปรเจกต์นี้ใช้ใบอนุญาต **MIT License** - ดูไฟล์ `LICENSE` สำหรับรายละเอียด
+
+---
+
+## 🎯 Roadmap
+
+- [ ] การสนับสนุน Advanced AI Models (GPT-4, Claude)
+- [ ] Backtesting Framework
+- [ ] Portfolio Management Tools
+- [ ] Mobile App Support
+- [ ] Real-time Notifications (Telegram, Discord)
+- [ ] Performance Analytics Dashboard
+- [ ] Multi-Account Management
+
+---
+
+## ⭐ ขอบคุณ
+
+ขอบคุณแก่ผู้ใช้ทีมงานในการช่วยพัฒนาและปรับปรุงโปรเจกต์นี้ให้ดีขึ้นอย่างต่อเนื่อง
+
+---
+
+<div align="center">
+
+**Made with ❤️ for Traders & Developers**
+
+`Last Updated: April 2026`
+
+</div>
