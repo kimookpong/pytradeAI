@@ -12,13 +12,11 @@ import math
 import asyncio
 import urllib.request
 import urllib.error
-from pathlib import Path
 from typing import Optional
 
 
 # ─── Settings persistence ───────────────────────────────────────
-
-SETTINGS_FILE = Path(__file__).parent / "ai_settings.json"
+# All settings managed by frontend localStorage only
 
 DEFAULT_SETTINGS = {
     "provider": "minimax",          # "minimax" | "gemini"

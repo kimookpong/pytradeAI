@@ -727,53 +727,56 @@
 
                     .analytics-summary-grid {
                         display: grid;
-                        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-                        gap: 16px;
+                        grid-template-columns: repeat(6, 1fr);
+                        gap: 10px;
                     }
 
                     .analytics-summary-card {
                         background: var(--bg-card);
-                        border: 2px solid var(--border-subtle);
-                        border-radius: 12px;
-                        padding: 20px;
+                        border: 1px solid var(--border-subtle);
+                        border-radius: 8px;
+                        padding: 10px 8px;
                         display: flex;
                         align-items: center;
-                        gap: 16px;
+                        gap: 6px;
                         transition: all 0.3s;
                     }
 
                     .analytics-summary-card:hover {
                         border-color: var(--text-bright);
-                        transform: translateY(-2px);
+                        background: var(--bg-surface);
                     }
 
                     .analytics-summary-card.primary {
                         background: linear-gradient(135deg, #1a472a, #0f2e1c);
                         border-color: #4ec9b0;
-                        box-shadow: 0 0 20px rgba(78, 201, 176, 0.1);
+                        box-shadow: 0 0 15px rgba(78, 201, 176, 0.1);
                     }
 
                     .summary-icon {
-                        font-size: 2.5rem;
+                        font-size: 1.8rem;
                         opacity: 0.8;
+                        flex-shrink: 0;
                     }
 
                     .summary-content {
                         flex: 1;
+                        min-width: 0;
                     }
 
                     .summary-label {
-                        font-size: 0.85rem;
+                        font-size: 0.65rem;
                         color: var(--text-muted);
-                        margin-bottom: 4px;
+                        margin-bottom: 1px;
                         text-transform: uppercase;
-                        letter-spacing: 0.5px;
+                        letter-spacing: 0.3px;
                     }
 
                     .summary-value {
-                        font-size: 2rem;
+                        font-size: 1.2rem;
                         font-weight: 700;
                         color: var(--text-bright);
+                        word-break: break-word;
                     }
 
                     /* Charts Section */

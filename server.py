@@ -23,7 +23,7 @@ from mt5_connector import MT5Connector
 from trading_engine import TradingEngine
 from smart_logic import SmartLogic
 from ai_insights import AIInsights
-from ai_engine import AIEngine, load_ai_settings, save_ai_settings
+from ai_engine import AIEngine
 from backtest_engine import BacktestEngine
 
 
@@ -76,12 +76,8 @@ class SaveAccountRequest(BaseModel):
 
 
 # ─── Saved Accounts Storage ─────────────────────────────────────
-
-# IMPORTANT: Account storage moved to frontend localStorage
+# All persistent data managed by frontend localStorage
 # Backend maintains in-memory cache only for current session
-# Frontend is responsible for persistence
-
-ACCOUNTS_FILE = Path(__file__).parent / "mt5_accounts.json"
 
 # In-memory accounts storage (session-only, no file persistence)
 _saved_accounts: list[dict] = []

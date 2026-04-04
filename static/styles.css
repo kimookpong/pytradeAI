@@ -536,8 +536,14 @@ body {
 
 .stats-row {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: var(--gap);
+}
+
+@media (max-width: 768px) {
+    .stats-row {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
 .stat-card {
@@ -604,11 +610,11 @@ body {
 
 /* Compact Stat Cards for History Page */
 .stats-compact {
-    gap: 12px;
+    gap: 8px;
 }
 
 .stat-card-compact {
-    padding: 8px 10px;
+    padding: 6px 8px;
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
     border-radius: var(--r-sm);
@@ -624,17 +630,17 @@ body {
 
 .stat-card-compact .stat-card-inner {
     flex-direction: column;
-    gap: 1px;
+    gap: 0px;
 }
 
 .stat-content-compact {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 0px;
 }
 
 .stat-lbl-compact {
-    font-size: 9px;
+    font-size: 8px;
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -642,7 +648,7 @@ body {
 }
 
 .stat-val-compact {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     color: var(--text-primary);
     font-family: var(--font-mono);
