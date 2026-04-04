@@ -1,0 +1,98 @@
+{
+  "price_updates": [
+    {
+      "symbol": "BTCUSD",
+      "bid": 66959.99,
+      "ask": 66973.99,
+      "spread": 14.0,
+      "checks": {
+        "bid_ask_valid": true,
+        "bid_less_than_ask": true,
+        "spread_positive": true,
+        "spread_matches": true,
+        "time_recent": true
+      },
+      "pass": true,
+      "timestamp": 1775291720.6229546
+    },
+    {
+      "symbol": "EURUSD",
+      "bid": 1.1514,
+      "ask": 1.15205,
+      "spread": 0.00065,
+      "checks": {
+        "bid_ask_valid": true,
+        "bid_less_than_ask": true,
+        "spread_positive": true,
+        "spread_matches": true,
+        "time_recent": false
+      },
+      "pass": false,
+      "timestamp": 1775291720.6258924
+    },
+    {
+      "symbol": "XAUUSD",
+      "bid": 4675.248,
+      "ask": 4675.644,
+      "spread": 0.396,
+      "checks": {
+        "bid_ask_valid": true,
+        "bid_less_than_ask": true,
+        "spread_positive": true,
+        "spread_matches": true,
+        "time_recent": false
+      },
+      "pass": false,
+      "timestamp": 1775291720.630172
+    }
+  ],
+  "account_snapshots": [
+    {
+      "balance": 94.05,
+      "equity": 93.36,
+      "margin": 1.67,
+      "free_margin": 91.69,
+      "leverage": 2000,
+      "checks": {
+        "balance_positive": true,
+        "equity_positive": true,
+        "equity_gte_balance": false,
+        "margin_valid": true,
+        "free_margin_valid": true,
+        "equity_calc_valid": true,
+        "leverage_reasonable": false
+      },
+      "pass": false,
+      "timestamp": 1775291720.6556726
+    }
+  ],
+  "orders_placed": [],
+  "positions_tracked": [
+    {
+      "ticket": 3839812090,
+      "symbol": "BTCUSD",
+      "type": "SELL",
+      "volume": 0.01,
+      "entry": 66904.89,
+      "current": 66973.99,
+      "pnl": -0.69,
+      "pnl_consistency_check": false,
+      "timestamp": 1775291720.7142243
+    }
+  ],
+  "history_queries": [
+    {
+      "days": 1,
+      "count": 61,
+      "all_complete": true,
+      "pass": true,
+      "timestamp": 1775291720.7220836
+    }
+  ],
+  "errors": [
+    {
+      "ts": 1775291720.711659,
+      "error": "HTTP 400 from POST /trade/place"
+    }
+  ]
+}

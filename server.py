@@ -24,6 +24,7 @@ from trading_engine import TradingEngine
 from smart_logic import SmartLogic
 from ai_insights import AIInsights
 from ai_engine import AIEngine, load_ai_settings, save_ai_settings
+from backtest_engine import BacktestEngine
 
 
 # ─── Request Models ─────────────────────────────────────────────
@@ -143,11 +144,12 @@ def broadcast_ai_thinking(thinking_entry: dict):
 
 # ─── Global Instances ───────────────────────────────────────────
 
-connector = MT5Connector()
+connector = MT5Connector(log_callback=log_event)
 engine = TradingEngine(connector, log_callback=log_event)
 smart = SmartLogic(connector)
-insights = AIInsights(connector)
+insights = AIInsights(connector, log_callback=log_event)
 ai_engine = AIEngine(connector, log_callback=log_event)
+backtest = BacktestEngine(connector, engine)
 
 # When AI is trading a symbol, skip the built-in strategy for that symbol
 engine.set_ai_mode_fn(ai_engine.is_ai_active)
@@ -277,6 +279,368 @@ async def get_retrain_suggestions():
 async def get_rankings():
     smart.update_prices()
     return smart.get_symbol_rankings()
+
+
+@app.post("/api/analytics/import-test-trades")
+async def import_test_trades():
+    """
+    DEBUG ENDPOINT: Import 50 sample trades for testing analytics.
+    Populate mt5_connector._history with test data.
+    """
+    try:
+        import random
+        from datetime import timedelta
+        from mt5_connector import HistoryDeal
+        
+        now = int(time.time())
+        symbols = ["BTCUSD", "XAUUSD", "ETHUSD", "EURUSD", "GBPUSD"]
+        strategies = ["Strategy-A", "Strategy-B", "Strategy-C"]
+        
+        # Clear existing history
+        mt5_connector._history.clear()
+        print(f"🗑️  Cleared history")
+        
+        # Generate 50 test trades
+        for i in range(50):
+            symbol = random.choice(symbols)
+            trade_type = random.randint(0, 1)
+            strategy = random.choice(strategies)
+            
+            # Win rate ~65%
+            if random.random() < 0.65:
+                profit = round(random.uniform(5, 150), 2)
+            else:
+                profit = round(random.uniform(-150, -5), 2)
+            
+            open_time = now - random.randint(86400, 30 * 86400)
+            close_time = open_time + random.randint(600, 7200)
+            
+            trade = HistoryDeal(
+                ticket=10000 + i,
+                symbol=symbol,
+                type=trade_type,
+                volume=round(random.choice([0.01, 0.02, 0.05, 0.1]), 2),
+                price_open=random.uniform(1.0, 100.0),
+                price_close=random.uniform(1.0, 100.0),
+                profit=profit,
+                time=open_time,
+                close_time=close_time,
+                comment=f"Auto-Trade ({strategy})"
+            )
+            mt5_connector._history.append(trade)
+        
+        print(f"✅ Imported {len(mt5_connector._history)} test trades")
+        
+        return {
+            "success": True,
+            "message": f"Imported 50 test trades into mt5_connector._history",
+            "count": len(mt5_connector._history),
+            "sample": {
+                "total_trades": 50,
+                "win_rate": "~65%",
+                "symbols": symbols,
+                "strategies": strategies,
+            }
+        }
+    except Exception as e:
+        import traceback
+        error_msg = str(e)
+        error_trace = traceback.format_exc()
+        print(f"❌ Import test trades error: {error_msg}")
+        print(error_trace)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": error_msg,
+                "trace": error_trace[:300]
+            }
+        )
+
+
+@app.get("/api/analytics")
+async def get_analytics(days: int = 30):
+    """
+    Get comprehensive trading analytics for Performance Dashboard:
+    - Win rate & trade statistics
+    - P&L by symbol & strategy
+    - Drawdown analysis
+    - Return metrics
+    """
+    try:
+        # Validate days parameter
+        if days < 1 or days > 365:
+            days = 30
+        
+        history = connector.get_history(days=days)
+        print(f"📊 Analytics: Found {len(history)} trades in last {days} days")
+        
+        if not history:
+            print("⚠️ No history data")
+            return {
+                "total_trades": 0,
+                "win_rate": 0.0,
+                "total_profit": 0.0,
+                "total_loss": 0.0,
+                "avg_profit": 0.0,
+                "avg_loss": 0.0,
+                "largest_win": 0.0,
+                "largest_loss": 0.0,
+                "by_symbol": {},
+                "by_strategy": {},
+                "drawdown": 0.0,
+                "daily_pnl": [],
+                "trades": [],
+            }
+
+        # Calculate statistics
+        wins = [t for t in history if t["profit"] > 0]
+        losses = [t for t in history if t["profit"] < 0]
+        total_profit = sum(t["profit"] for t in wins)
+        total_loss = sum(t["profit"] for t in losses)  # negative values
+        
+        win_count = len(wins)
+        loss_count = len(losses)
+        total_count = len(history)
+        win_rate = (win_count / total_count * 100) if total_count > 0 else 0.0
+        
+        print(f"✅ Stats: wins={win_count}, losses={loss_count}, rate={win_rate:.1f}%")
+
+        # By symbol
+        by_symbol = {}
+        for trade in history:
+            sym = trade["symbol"]
+            if sym not in by_symbol:
+                by_symbol[sym] = {"trades": 0, "wins": 0, "profit": 0.0, "pnl_list": []}
+            by_symbol[sym]["trades"] += 1
+            by_symbol[sym]["pnl_list"].append(trade["profit"])
+            if trade["profit"] > 0:
+                by_symbol[sym]["wins"] += 1
+            by_symbol[sym]["profit"] += trade["profit"]
+
+        # By strategy (infer from comment or use symbol as proxy)
+        by_strategy = {}
+        for trade in history:
+            # Extract strategy name from comment (e.g., "Auto-Trade (Strategy-A)" -> "Strategy-A")
+            comment = trade.get("comment", "") or trade.get("comment", "Manual")
+            if "Strategy-" in comment:
+                # Extract strategy name like "Strategy-A" from comment
+                import re
+                match = re.search(r'Strategy-[A-Z]', comment)
+                strat = match.group(0) if match else "Manual"
+            else:
+                strat = "Manual"
+            
+            if strat not in by_strategy:
+                by_strategy[strat] = {"trades": 0, "wins": 0, "profit": 0.0}
+            by_strategy[strat]["trades"] += 1
+            if trade["profit"] > 0:
+                by_strategy[strat]["wins"] += 1
+            by_strategy[strat]["profit"] += trade["profit"]
+
+        # Daily P&L for chart
+        daily_pnl = {}
+        for trade in history:
+            day = datetime.fromtimestamp(trade["time"]).strftime("%Y-%m-%d")
+            if day not in daily_pnl:
+                daily_pnl[day] = 0.0
+            daily_pnl[day] += trade["profit"]
+        
+        daily_pnl_list = [{"date": k, "profit": v} for k, v in sorted(daily_pnl.items())]
+
+        # Drawdown: peak-to-trough decline
+        cumulative = [0]
+        for trade in sorted(history, key=lambda t: t["time"]):
+            cumulative.append(cumulative[-1] + trade["profit"])
+        
+        peak = cumulative[0] if cumulative else 0
+        max_drawdown = 0
+        for val in cumulative:
+            if val > peak:
+                peak = val
+            drawdown = peak - val
+            if drawdown > max_drawdown:
+                max_drawdown = drawdown
+
+        return {
+            "total_trades": total_count,
+            "win_rate": round(win_rate, 2),
+            "total_profit": round(total_profit, 2),
+            "total_loss": round(total_loss, 2),
+            "net_profit": round(total_profit + total_loss, 2),
+            "avg_profit": round(total_profit / win_count, 2) if win_count > 0 else 0.0,
+            "avg_loss": round(total_loss / loss_count, 2) if loss_count > 0 else 0.0,
+            "largest_win": round(max(wins, key=lambda x: x["profit"])["profit"], 2) if wins else 0.0,
+            "largest_loss": round(min(losses, key=lambda x: x["profit"])["profit"], 2) if losses else 0.0,
+            "by_symbol": {
+                sym: {
+                    "trades": stats["trades"],
+                    "wins": stats["wins"],
+                    "win_rate": round(stats["wins"] / stats["trades"] * 100, 1) if stats["trades"] > 0 else 0,
+                    "profit": round(stats["profit"], 2),
+                    "avg_trade": round(stats["profit"] / stats["trades"], 2) if stats["trades"] > 0 else 0,
+                }
+                for sym, stats in by_symbol.items()
+            },
+            "by_strategy": {
+                strat: {
+                    "trades": stats["trades"],
+                    "wins": stats["wins"],
+                    "win_rate": round(stats["wins"] / stats["trades"] * 100, 1) if stats["trades"] > 0 else 0,
+                    "profit": round(stats["profit"], 2),
+                }
+                for strat, stats in by_strategy.items()
+            },
+            "drawdown": round(max_drawdown, 2),
+            "daily_pnl": daily_pnl_list,
+            "trades": history,  # Include individual trade records for detail view
+        }
+    
+    except Exception as e:
+        # Return error as JSON instead of exception page
+        import traceback
+        error_msg = str(e)
+        error_trace = traceback.format_exc()
+        print(f"❌ Analytics error: {error_msg}")
+        print(error_trace)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Failed to load analytics",
+                "message": error_msg,
+                "trace": error_trace[:500],  # Limit trace length
+                "total_trades": 0,
+                "win_rate": 0.0,
+                "total_profit": 0.0,
+                "total_loss": 0.0,
+                "avg_profit": 0.0,
+                "avg_loss": 0.0,
+                "largest_win": 0.0,
+                "largest_loss": 0.0,
+                "by_symbol": {},
+                "by_strategy": {},
+                "drawdown": 0.0,
+                "daily_pnl": [],
+                "trades": [],
+            }
+        )
+
+
+@app.get("/api/analytics/history")
+async def get_analytics_history(limit: int = 30):
+    """
+    Get historical analytics snapshots.
+    Returns aggregated analytics by day for trend analysis.
+    """
+    history = mt5_connector.get_history(days=90)
+    if not history:
+        return {"snapshots": []}
+
+    # Group by date
+    by_date = {}
+    for trade in history:
+        day = datetime.fromtimestamp(trade["time"]).strftime("%Y-%m-%d")
+        if day not in by_date:
+            by_date[day] = []
+        by_date[day].append(trade)
+
+    # Calculate daily snapshots
+    snapshots = []
+    for day in sorted(by_date.keys())[-limit:]:
+        trades = by_date[day]
+        wins = len([t for t in trades if t["profit"] > 0])
+        total = len(trades)
+        profit = sum(t["profit"] for t in trades)
+
+        snapshots.append({
+            "date": day,
+            "trades": total,
+            "wins": wins,
+            "win_rate": round(wins / total * 100, 1) if total > 0 else 0,
+            "profit": round(profit, 2),
+        })
+
+    return {"snapshots": snapshots}
+
+
+# ─── Backtesting ───────────────────────────────────────────────
+
+@app.get("/api/backtest/run")
+async def run_backtest(symbol: str = "BTCUSD", days: int = 30):
+    """
+    Run backtest on a single symbol
+    
+    Query params:
+    - symbol: Trading symbol (e.g., "BTCUSD")
+    - days: Number of days to backtest (1-365)
+    """
+    try:
+        if symbol.upper() not in connector.SYMBOLS:
+            return {"error": f"Unknown symbol: {symbol}"}
+        
+        result = backtest.run_backtest(symbol.upper(), days)
+        
+        # Log backtest
+        log_event("BACKTEST", 
+                 f"Backtest {symbol}: ROI={result.get('roi_percent', 0):.1f}%, "
+                 f"WinRate={result.get('win_rate', 0):.0f}%")
+        
+        return result
+    except Exception as e:
+        print(f"❌ Backtest error: {str(e)}")
+        return {"error": str(e)}
+
+
+@app.get("/api/backtest/compare")
+async def compare_backtests(symbols: str = "BTCUSD,EURUSD", days: int = 30):
+    """
+    Compare backtest performance across multiple symbols
+    
+    Query params:
+    - symbols: Comma-separated symbols (e.g., "BTCUSD,XAUUSD,EURUSD")
+    - days: Number of days to backtest
+    """
+    try:
+        symbol_list = [s.strip().upper() for s in symbols.split(",")]
+        
+        # Filter valid symbols
+        valid_symbols = [s for s in symbol_list if s in connector.SYMBOLS]
+        
+        if not valid_symbols:
+            return {"error": "No valid symbols provided"}
+        
+        result = backtest.compare_symbols(valid_symbols, days)
+        
+        log_event("BACKTEST", f"Comparison: {len(valid_symbols)} symbols over {days} days")
+        
+        return result
+    except Exception as e:
+        print(f"❌ Comparison error: {str(e)}")
+        return {"error": str(e)}
+
+
+@app.get("/api/backtest/strategy")
+async def backtest_strategy(symbol: str = "BTCUSD", strategy: str = "RSI", days: int = 30):
+    """
+    Backtest specific strategy on symbol
+    
+    Query params:
+    - symbol: Trading symbol
+    - strategy: Strategy name (RSI, MA_Cross, etc.)
+    - days: Number of days to backtest
+    """
+    try:
+        if symbol.upper() not in connector.SYMBOLS:
+            return {"error": f"Unknown symbol: {symbol}"}
+        
+        result = backtest.backtest_strategy(symbol.upper(), strategy, days)
+        
+        log_event("BACKTEST", f"Strategy {strategy} on {symbol}: {result.get('recommendation', '')}")
+        
+        return result
+    except Exception as e:
+        print(f"❌ Strategy backtest error: {str(e)}")
+        return {"error": str(e)}
 
 
 # ─── MT5 Connection ────────────────────────────────────────────
@@ -540,6 +904,53 @@ async def get_system_log():
     return {"log": list(_system_log)}
 
 
+@app.get("/api/log/export")
+async def export_system_log():
+    """Export system log as JSON file for download."""
+    import json as json_module
+    from datetime import datetime
+    
+    log_data = {
+        "exported_at": datetime.now().isoformat(),
+        "total_entries": len(_system_log),
+        "logs": list(_system_log),
+        "ai_thinking_logs": ai_engine._thinking_log[-100:] if ai_engine else [],
+    }
+    
+    filename = f"pytradeAI_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    return JSONResponse(
+        content=log_data,
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@app.get("/api/history/export")
+async def export_trade_history():
+    """Export trade history as CSV file for download."""
+    from datetime import datetime
+    
+    history = connector.get_history(days=365)  # Last 365 days
+    
+    if not history:
+        return {"error": "No trade history available"}
+    
+    # Build CSV content
+    csv_lines = ["Ticket,Symbol,Type,Volume,PriceOpen,PriceClose,Profit,OpenTime,CloseTime,Comment"]
+    for trade in history:
+        line = f"{trade.get('ticket','')},{trade.get('symbol','')},{trade.get('type','')},{trade.get('volume','')},{trade.get('price_open','')},{trade.get('price_close','')},{trade.get('profit','')},{trade.get('time','')},{trade.get('close_time','')},{trade.get('comment','')}"
+        csv_lines.append(line)
+    
+    csv_content = "\n".join(csv_lines)
+    filename = f"pytradeAI_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    
+    return {
+        "filename": filename,
+        "count": len(history),
+        "csv": csv_content
+    }
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
@@ -591,9 +1002,10 @@ async def handle_ws_command(ws: WebSocket, msg: dict):
 
     elif cmd == "close_position":
         ticket = msg.get("ticket", 0)
-        result = connector.close_position(ticket)
+        force = msg.get("force", False)
+        result = connector.close_position(ticket, force=force)
         log_event("TRADE",
-                  f"{'✅' if result.success else '❌'} Close position #{ticket}",
+                  f"{'✅' if result.success else '❌'} Close position #{ticket}" + (f" (FORCE)" if force else ""),
                   result.message)
         await ws.send_json({"type": "close_result", "success": result.success, "message": result.message})
 

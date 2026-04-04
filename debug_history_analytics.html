@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>History vs Analytics Debug</title>
+    <style>
+        body { font-family: monospace; margin: 20px; background: #1e1e1e; color: #d4d4d4; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #444; }
+        .section h3 { color: #4ec9b0; margin-top: 0; }
+        pre { background: #252526; padding: 10px; overflow-x: auto; max-height: 300px; font-size: 11px; }
+        button { padding: 8px 16px; margin: 5px; background: #0e639c; color: white; border: none; cursor: pointer; }
+        button:hover { background: #1177bb; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .stats { padding: 10px; border-left: 3px solid #4ec9b0; background: #1a3a1a; margin: 10px 0; }
+        .error { color: #f48771; }
+        .success { color: #4ec9b0; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🔍 History vs Analytics Debug Tool</h2>
+    
+    <div class="section">
+        <h3>1. Compare Endpoints</h3>
+        <button onclick="compareEndpoints()">📊 Compare /api/history vs /api/analytics</button>
+        <div id="compare-result"></div>
+    </div>
+
+    <div class="grid">
+        <div class="section">
+            <h3>📜 /api/history</h3>
+            <button onclick="testHistoryAPI()">Load /api/history</button>
+            <pre id="history-result"></pre>
+        </div>
+        
+        <div class="section">
+            <h3>📈 /api/analytics</h3>
+            <button onclick="testAnalyticsAPI()">Load /api/analytics</button>
+            <pre id="analytics-result"></pre>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>🔧 Manual Calculation</h3>
+        <button onclick="manualCalc()">Recalculate Analytics from History</button>
+        <pre id="manual-result"></pre>
+    </div>
+</div>
+
+<script>
+const API_BASE = "http://localhost:8888/api";
+
+async function compareEndpoints() {
+    const el = document.getElementById("compare-result");
+    el.innerHTML = "🔄 Loading both endpoints...";
+    
+    try {
+        const histRes = await fetch(`${API_BASE}/history?days=30`);
+        const histData = await histRes.json();
+        
+        const analRes = await fetch(`${API_BASE}/analytics?days=30`);
+        const analData = await analRes.json();
+        
+        let result = `
+<span class="stats">
+📜 <strong>/api/history</strong>
+- Type: ${Array.isArray(histData) ? "Array" : "Object"}
+- Length: ${Array.isArray(histData) ? histData.length : "N/A"}
+- First item: ${histData[0] ? JSON.stringify(histData[0]).substring(0, 80) : "empty"}
+</span>
+
+<span class="stats">
+📈 <strong>/api/analytics</strong>
+- total_trades: ${analData.total_trades || 0}
+- win_rate: ${analData.win_rate || 0}%
+- net_profit: $${analData.net_profit || 0}
+- by_symbol count: ${Object.keys(analData.by_symbol || {}).length}
+- by_strategy count: ${Object.keys(analData.by_strategy || {}).length}
+</span>
+
+<strong>Analysis:</strong>
+${histData.length === 0 && analData.total_trades === 0 
+    ? "✅ Both empty (expected)" 
+    : histData.length > 0 && analData.total_trades === 0 
+        ? "❌ <strong>MISMATCH</strong>: History has data but analytics doesn't" 
+        : histData.length > 0 && analData.total_trades === histData.length 
+            ? "✅ Data matches" 
+            : `❌ Data count mismatch: history=${histData.length}, analytics=${analData.total_trades}`}
+`;
+        
+        el.innerHTML = result;
+    } catch (err) {
+        el.innerHTML = `<span class="error">❌ Error: ${err.message}</span>`;
+    }
+}
+
+async function testHistoryAPI() {
+    const el = document.getElementById("history-result");
+    el.innerHTML = "🔄 Loading...";
+    
+    try {
+        const res = await fetch(`${API_BASE}/history?days=30`);
+        const data = await res.json();
+        
+        if (Array.isArray(data)) {
+            el.innerHTML = `<span class="success">✅ Got ${data.length} trades</span>\n\n${
+                data.slice(0, 3).map((t, i) => `Trade ${i+1}: ${t.symbol} ${t.type} profit=$${t.profit}`).join('\n')
+            }\n\n${data.length > 3 ? `... and ${data.length - 3} more` : ''}`;
+        } else {
+            el.innerHTML = `${JSON.stringify(data, null, 2)}`;
+        }
+    } catch (err) {
+        el.innerHTML = `<span class="error">❌ ${err.message}</span>`;
+    }
+}
+
+async function testAnalyticsAPI() {
+    const el = document.getElementById("analytics-result");
+    el.innerHTML = "🔄 Loading...";
+    
+    try {
+        const res = await fetch(`${API_BASE}/analytics?days=30`);
+        const data = await res.json();
+        
+        el.innerHTML = `${JSON.stringify(data, null, 2)}`;
+    } catch (err) {
+        el.innerHTML = `<span class="error">❌ ${err.message}</span>`;
+    }
+}
+
+async function manualCalc() {
+    const el = document.getElementById("manual-result");
+    el.innerHTML = "🔄 Fetching history...";
+    
+    try {
+        const res = await fetch(`${API_BASE}/history?days=30`);
+        const trades = await res.json();
+        
+        if (!Array.isArray(trades) || trades.length === 0) {
+            el.innerHTML = "❌ No trades found";
+            return;
+        }
+        
+        // Manual calculations
+        const wins = trades.filter(t => t.profit > 0);
+        const losses = trades.filter(t => t.profit < 0);
+        const total = trades.length;
+        const winRate = (wins.length / total * 100).toFixed(1);
+        const totalProfit = wins.reduce((s, t) => s + t.profit, 0);
+        const totalLoss = losses.reduce((s, t) => s + t.profit, 0);
+        const netProfit = totalProfit + totalLoss;
+        
+        // By symbol
+        const bySymbol = {};
+        trades.forEach(t => {
+            if (!bySymbol[t.symbol]) bySymbol[t.symbol] = {trades: 0, wins: 0, profit: 0};
+            bySymbol[t.symbol].trades++;
+            bySymbol[t.symbol].profit += t.profit;
+            if (t.profit > 0) bySymbol[t.symbol].wins++;
+        });
+        
+        let result = `<span class="success">✅ Manual Calculation from ${total} trades</span>\n`;
+        result += `\nSummary:
+- Total: ${total}
+- Wins: ${wins.length}
+- Losses: ${losses.length}
+- Win Rate: ${winRate}%
+- Total Profit: $${totalProfit.toFixed(2)}
+- Total Loss: $${totalLoss.toFixed(2)}
+- Net: $${netProfit.toFixed(2)}\n`;
+        
+        result += `\nBy Symbol:\n`;
+        Object.entries(bySymbol).forEach(([sym, stats]) => {
+            const wr = (stats.wins / stats.trades * 100).toFixed(1);
+            result += `${sym}: trades=${stats.trades}, wins=${stats.wins}, wr=${wr}%, p&l=$${stats.profit.toFixed(2)}\n`;
+        });
+        
+        el.innerHTML = result;
+    } catch (err) {
+        el.innerHTML = `<span class="error">❌ ${err.message}</span>`;
+    }
+}
+
+// Auto-run comparison on load
+window.addEventListener("load", compareEndpoints);
+</script>
+
+</body>
+</html>

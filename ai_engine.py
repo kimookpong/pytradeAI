@@ -162,15 +162,18 @@ class AIEngine:
         now = time.time()
         cached = self._perf_cache.get(symbol)
         if cached and (now - cached[0]) < 120:
+            self._log("AI", f"Performance context cache HIT for {symbol}", detail={"symbol": symbol, "cached": True, "stats": cached[1]})
             return cached[1]
 
         try:
             history = self.connector.get_history(14)
-        except Exception:
+        except Exception as e:
+            self._log("ERROR", f"Failed to query history for {symbol}: {e}", detail={"symbol": symbol, "error": str(e)})
             return {}
 
         sym_trades = [t for t in history if t.get("symbol") == symbol]
         if not sym_trades:
+            self._log("AI", f"Performance context: No trades for {symbol} in last 14 days", detail={"symbol": symbol, "count": 0})
             self._perf_cache[symbol] = (now, {})
             return {}
 
@@ -198,6 +201,7 @@ class AIEngine:
             "avg_loss": round(avg_loss, 2),
             "last5":    last5_str,
         }
+        self._log("AI", f"Performance context: {symbol} - {len(sym_trades)} trades, {len(wins)} wins ({win_rate:.0f}%), P/L ${net_pnl:+.2f}", detail={"symbol": symbol, **stats})
         self._perf_cache[symbol] = (now, stats)
         return stats
 
@@ -240,7 +244,7 @@ class AIEngine:
         price_data = self.connector.get_symbol_price(symbol)
         spread = price_data.get("spread", 0) if price_data else 0
 
-        return {
+        ctx = {
             "symbol": symbol,
             "last_price": round(last, 5),
             "sma5": round(sma5, 5),
@@ -251,6 +255,8 @@ class AIEngine:
             "spread": round(spread, 5),
             "bars_available": n,
         }
+        self._log("AI", f"Market context for {symbol}: Price={ctx['last_price']}, RSI={ctx['rsi14']}, Vol={ctx['volatility_pct']}%, Trend={ctx['trend_5bar_pct']:+.2f}%", detail=ctx)
+        return ctx
 
     def _build_prompt(self, symbol: str, ctx: dict) -> str:
         """Build the AI prompt for market analysis, including performance context."""

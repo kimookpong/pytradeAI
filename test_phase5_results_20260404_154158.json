@@ -1,0 +1,36 @@
+{
+  "analytics_snapshots": [
+    {
+      "total_trades": 61,
+      "wins": 17,
+      "losses": 44,
+      "win_rate": 27.87,
+      "total_pnl": 3.44,
+      "avg_win": 0.2,
+      "avg_loss": -0.22,
+      "checks": {
+        "total_trades_valid": true,
+        "wins_losses_sum": true,
+        "win_rate_valid": true,
+        "win_rate_calc_valid": true,
+        "avg_win_positive": true,
+        "avg_loss_negative": true,
+        "pnl_consistency": true
+      },
+      "pass": true,
+      "timestamp": 1775292118.8935933
+    }
+  ],
+  "history_validation": [
+    {
+      "total_trades": 61,
+      "valid_sample": 10,
+      "completeness_pct": 100.0,
+      "pass": true,
+      "timestamp": 1775292118.8977475
+    }
+  ],
+  "calculations": [],
+  "retrain_suggestions": [],
+  "errors": []
+}

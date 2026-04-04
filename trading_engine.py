@@ -219,11 +219,14 @@ class TradingEngine:
 
             # Need at least 20 periods for indicators
             if len(self._price_history[symbol]) < 20:
+                self._log("STRATEGY", f"Strategy {symbol}: Insufficient data ({len(self._price_history[symbol])}/20 bars)", detail={"symbol": symbol, "bars": len(self._price_history[symbol])})
                 continue
 
             # Check cooldown
             now = time.time()
-            if now - self._last_trade_time.get(symbol, 0) < self._trade_cooldown:
+            cooldown_remaining = self._trade_cooldown - (now - self._last_trade_time.get(symbol, 0))
+            if cooldown_remaining > 0:
+                self._log("TRADE", f"Strategy {symbol}: Cooldown active ({cooldown_remaining:.0f}s remaining)", detail={"symbol": symbol, "cooldown": round(cooldown_remaining, 1)})
                 continue
 
             # Generate signal
@@ -356,13 +359,28 @@ class TradingEngine:
             else:
                 sell_signals += 1
 
+        # Log technical analysis for debugging
+        self._log("TRADE", f"📊 Signal analysis {symbol}: RSI={rsi:.1f}, MA7={ma_fast:.5f}, MA20={ma_slow:.5f}, Price={current_price:.5f}, BB=[{lower_band:.5f},{upper_band:.5f}], Trend={'UP' if has_buy_trend else 'DOWN' if has_sell_trend else 'FLAT'}", detail={
+            "symbol": symbol,
+            "rsi": round(rsi, 1),
+            "ma_fast": round(ma_fast, 5),
+            "ma_slow": round(ma_slow, 5),
+            "current_price": round(current_price, 5),
+            "upper_band": round(upper_band, 5),
+            "lower_band": round(lower_band, 5),
+            "buy_signals": buy_signals,
+            "sell_signals": sell_signals,
+        })
+
         # **CRITICAL**: BUY requires confirmed uptrend + strong signal
         if buy_signals >= 3 and sell_signals < 2 and has_buy_trend:
+            self._log("TRADE", f"🟢 BUY Signal {symbol}: buy_signals={buy_signals}, sell_signals={sell_signals}, uptrend=YES", detail={"symbol": symbol, "signal": "BUY", "buy_count": buy_signals, "sell_count": sell_signals})
             return "BUY"
         
         # **CRITICAL**: SELL requires confirmed downtrend + MA signal + strong RSI
         # Don't enter SELL on Bollinger Bands alone — too many false breakouts
         if sell_signals >= 3 and buy_signals < 2 and has_sell_trend and rsi > 60:
+            self._log("TRADE", f"🔴 SELL Signal {symbol}: sell_signals={sell_signals}, buy_signals={buy_signals}, downtrend=YES, RSI={rsi:.1f}", detail={"symbol": symbol, "signal": "SELL", "buy_count": buy_signals, "sell_count": sell_signals, "rsi": round(rsi, 1)})
             return "SELL"
 
         return "HOLD"

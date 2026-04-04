@@ -87,7 +87,7 @@ class MT5Connector:
         "GBPUSD": {"digits": 5, "base_price": 1.26800, "spread": 0.00015, "pip_value": 0.00001, "min_volume": 0.01, "step_volume": 0.01, "max_volume": 1000.0},
     }
 
-    def __init__(self):
+    def __init__(self, log_callback=None):
         self.connected = False
         self.simulation_mode = not MT5_AVAILABLE
         self._account = AccountInfo()
@@ -96,6 +96,7 @@ class MT5Connector:
         self._sim_prices: dict[str, float] = {}
         self._sim_ticket_counter = 100000
         self._sim_start_time = time.time()
+        self._log = log_callback or (lambda *a, **kw: None)
         # Maps display name (EURUSD) → broker name (EURUSDm)
         self._broker_map: dict[str, str] = {s: s for s in self.SYMBOLS}
 
@@ -244,25 +245,30 @@ class MT5Connector:
             price = self._sim_prices.get(symbol, 0)
             spread = self.SYMBOLS.get(symbol, {}).get("spread", 0)
             digits = self.SYMBOLS.get(symbol, {}).get("digits", 2)
-            return {
+            result = {
                 "symbol": symbol,
                 "bid": round(price, digits),
                 "ask": round(price + spread, digits),
                 "spread": round(spread, digits),
                 "time": int(time.time()),
             }
+            self._log("MT5", f"Price update: {symbol} bid={result['bid']}, ask={result['ask']}, spread={result['spread']}", detail={"symbol": symbol, "bid": result["bid"], "ask": result["ask"]})
+            return result
 
         broker_sym = self._broker_map.get(symbol, symbol)
         tick = mt5.symbol_info_tick(broker_sym)
         if tick is None:
+            self._log("ERROR", f"Failed to get price for {symbol} ({broker_sym})", detail={"symbol": symbol})
             return {}
-        return {
+        result = {
             "symbol": symbol,
             "bid": tick.bid,
             "ask": tick.ask,
             "spread": round(tick.ask - tick.bid, 5),
             "time": tick.time,
         }
+        self._log("MT5", f"Price update: {symbol} bid={result['bid']}, ask={result['ask']}, spread={result['spread']}", detail={"symbol": symbol, "bid": result["bid"], "ask": result["ask"]})
+        return result
 
     def validate_volume(self, symbol: str, volume: float) -> tuple:
         """Validate and adjust volume against broker limits for a symbol.
@@ -301,11 +307,13 @@ class MT5Connector:
         # Validate volume against broker limits
         validated_volume, is_valid, message = self.validate_volume(symbol, volume)
         if not is_valid:
-            return TradeResult(
+            error_result = TradeResult(
                 success=False,
                 message=f"Order failed: {message}",
                 data={"symbol": symbol, "order_type": order_type, "attempted_volume": volume}
             )
+            self._log("ERROR", f"Order rejected: {symbol} {order_type} volume {volume} - {message}", detail={"symbol": symbol, "type": order_type, "volume": volume, "reason": message})
+            return error_result
         
         # Use validated volume
         volume = validated_volume
@@ -341,13 +349,17 @@ class MT5Connector:
                 comment=comment or "Auto-Trade",
             )
             self._positions.append(pos)
-            return TradeResult(success=True, ticket=pos.ticket, message=f"Order placed: {order_type} {volume} {symbol}")
+            success_result = TradeResult(success=True, ticket=pos.ticket, message=f"Order placed: {order_type} {volume} {symbol}")
+            self._log("TRADE", f"🟢 Order placed (SIM): {order_type} {volume} {symbol} @ {entry_price:.5f}, ticket={pos.ticket}, SL={sl:.5f}, TP={tp:.5f}", detail={"action": "order_placed", "symbol": symbol, "type": order_type, "volume": volume, "entry": entry_price, "ticket": pos.ticket, "sl": sl, "tp": tp})
+            return success_result
 
         # Real MT5 order
         broker_sym = self._broker_map.get(symbol, symbol)
         price_info = mt5.symbol_info_tick(broker_sym)
         if price_info is None:
-            return TradeResult(success=False, message=f"Failed to get price for {symbol} ({broker_sym})")
+            error_result = TradeResult(success=False, message=f"Failed to get price for {symbol} ({broker_sym})")
+            self._log("ERROR", f"Failed to get price for {symbol} ({broker_sym})", detail={"symbol": symbol})
+            return error_result
 
         filling_type = mt5.ORDER_FILLING_IOC
         if order_type.upper() == "BUY":
@@ -377,17 +389,23 @@ class MT5Connector:
         result = mt5.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             msg = result.comment if result else "Unknown error"
-            return TradeResult(success=False, message=f"Order failed: {msg}")
+            error_result = TradeResult(success=False, message=f"Order failed: {msg}")
+            self._log("ERROR", f"Order failed (MT5): {symbol} {order_type} - {msg}", detail={"symbol": symbol, "type": order_type, "volume": volume, "reason": msg})
+            return error_result
 
-        return TradeResult(success=True, ticket=result.order, message=f"Order executed: {order_type} {volume} {symbol}")
+        success_result = TradeResult(success=True, ticket=result.order, message=f"Order executed: {order_type} {volume} {symbol}")
+        self._log("TRADE", f"🟢 Order placed (MT5): {order_type} {volume} {symbol} @ {price:.5f}, ticket={result.order}, SL={sl:.5f}, TP={tp:.5f}", detail={"action": "order_placed", "symbol": symbol, "type": order_type, "volume": volume, "entry": price, "ticket": result.order, "sl": sl, "tp": tp})
+        return success_result
 
-    def close_position(self, ticket: int) -> TradeResult:
+    def close_position(self, ticket: int, force: bool = False) -> TradeResult:
         """
         Close an open position by ticket.
-        M5 timeframe: 
-        - Before 5min: Can close if profit >= min_profit OR profit >= 50% TP
-        - After 5min: Can close ONLY if proper exit signal (RSI overbought/oversold OR near TP) + profit confirmation
-        Other timeframes: can close after 1 minute if profit >= min_profit.
+        If force=True: Override strategy lockout and close immediately (for manual override).
+        Otherwise:
+        - M5 timeframe: 
+          - Before 5min: Can close if profit >= min_profit OR profit >= 50% TP
+          - After 5min: Can close ONLY if proper exit signal (RSI overbought/oversold OR near TP) + profit confirmation
+        - Other timeframes: can close after 1 minute if profit >= min_profit.
         """
         current_time = int(time.time())
         
@@ -397,6 +415,25 @@ class MT5Connector:
                     time_elapsed = current_time - p.time
                     is_m5 = p.timeframe == "M5"
                     min_hold_seconds = 300 if is_m5 else 60  # 5 min for M5, 1 min for others
+                    
+                    # FORCE CLOSE: Skip all strategy checks (manual override)
+                    if force:
+                        deal = HistoryDeal(
+                            ticket=p.ticket,
+                            symbol=p.symbol,
+                            type=p.type,
+                            volume=p.volume,
+                            price_open=p.price_open,
+                            price_close=p.price_current,
+                            profit=p.profit,
+                            time=p.time,
+                            close_time=int(time.time()),
+                            comment="Force Closed",
+                        )
+                        self._history.append(deal)
+                        self._account.balance += p.profit
+                        self._positions.pop(i)
+                        return TradeResult(success=True, ticket=ticket, message=f"✅ FORCE CLOSED: Position {ticket}, P&L: {p.profit:.2f}")
                     
                     # Check if profit trigger is hit
                     can_close_by_profit = False
@@ -467,8 +504,13 @@ class MT5Connector:
                     self._history.append(deal)
                     self._account.balance += p.profit
                     self._positions.pop(i)
-                    return TradeResult(success=True, ticket=ticket, message=f"Position {ticket} closed, P&L: {p.profit:.2f}")
-            return TradeResult(success=False, message=f"Position {ticket} not found")
+                    result = TradeResult(success=True, ticket=ticket, message=f"Position {ticket} closed, P&L: {p.profit:.2f}")
+                    trade_type = "BUY" if p.type == 0 else "SELL"
+                    self._log("TRADE", f"🔴 Position closed (SIM): {trade_type} {p.symbol} {p.volume}lot, Profit: ${p.profit:.2f}, Entry: {p.price_open:.5f}, Close: {p.price_current:.5f}", detail={"action": "position_closed", "symbol": p.symbol, "type": trade_type, "volume": p.volume, "profit": p.profit, "entry": p.price_open, "close": p.price_current})
+                    return result
+            error_result = TradeResult(success=False, message=f"Position {ticket} not found")
+            self._log("ERROR", f"Close failed: Position {ticket} not found (SIM)", detail={"ticket": ticket})
+            return error_result
 
         # Real MT5 close
         position = None
@@ -476,7 +518,9 @@ class MT5Connector:
         if positions and len(positions) > 0:
             position = positions[0]
         if position is None:
-            return TradeResult(success=False, message=f"Position {ticket} not found")
+            error_result = TradeResult(success=False, message=f"Position {ticket} not found")
+            self._log("ERROR", f"Close failed: Position {ticket} not found (MT5)", detail={"ticket": ticket})
+            return error_result
 
         # Check timeframe restrictions and profit trigger
         time_elapsed = current_time - position.time
@@ -562,26 +606,34 @@ class MT5Connector:
     def get_history(self, days: int = 30) -> list[dict]:
         """Get trade history for the last N days."""
         if self.simulation_mode:
-            return [
-                {
-                    "ticket":      d.ticket,
-                    "symbol":      d.symbol,
-                    "type":        "BUY" if d.type == 0 else "SELL",
-                    "volume":      d.volume,
-                    "price_open":  round(d.price_open,  5),
-                    "price_close": round(d.price_close, 5),
-                    "profit":      round(d.profit, 2),
-                    "time":        d.time,
-                    "close_time":  d.close_time,
-                    "comment":     d.comment,
-                }
-                for d in self._history
-            ]
+            # Filter by days in simulation mode
+            cutoff_time = int(time.time()) - (days * 86400)
+            
+            result = []
+            for d in self._history:
+                # Filter by close_time if available, otherwise by open time
+                trade_time = d.close_time if d.close_time > 0 else d.time
+                if trade_time >= cutoff_time:
+                    result.append({
+                        "ticket":      d.ticket,
+                        "symbol":      d.symbol,
+                        "type":        "BUY" if d.type == 0 else "SELL",
+                        "volume":      d.volume,
+                        "price_open":  round(d.price_open,  5),
+                        "price_close": round(d.price_close, 5),
+                        "profit":      round(d.profit, 2),
+                        "time":        d.time,
+                        "close_time":  d.close_time,
+                        "comment":     d.comment,
+                    })
+            self._log("MT5", f"History query (SIM): {len(result)} trades in last {days} days", detail={"count": len(result), "days": days, "trades": result[:5]})
+            return result
 
         # Real MT5: group IN/OUT deals by position_id to build round-trips
         from_date = datetime.now() - timedelta(days=days)
         deals = mt5.history_deals_get(from_date, datetime.now())
         if deals is None:
+            self._log("ERROR", f"Failed to get MT5 history for {days} days", detail={"days": days})
             return []
         rev_map = {v: k for k, v in self._broker_map.items()}
 
@@ -618,6 +670,7 @@ class MT5Connector:
                 "close_time":  out.time,  # close time from OUT deal
                 "comment":     out.comment if hasattr(out, "comment") else "",
             })
+        self._log("MT5", f"History query (MT5): {len(result)} trades in last {days} days", detail={"count": len(result), "days": days, "trades": result[:5]})
         return result
 
     def _check_exit_signal(self, position: Position) -> bool:

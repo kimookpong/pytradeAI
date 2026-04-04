@@ -12,14 +12,16 @@ from typing import Optional
 class AIInsights:
     """Analyzes trading performance and provides actionable insights."""
 
-    def __init__(self, connector):
+    def __init__(self, connector, log_callback=None):
         self.connector = connector
+        self._log = log_callback or (lambda *a, **kw: None)
 
     def get_insights(self, days: int = 30) -> dict:
         """Get comprehensive R&D insights."""
         history = self.connector.get_history(days)
 
         if not history:
+            self._log("SYSTEM", f"No trade history for insights analysis (last {days} days)", detail={"days": days, "count": 0})
             return {
                 "most_lost_symbol": {"symbol": "None!", "total_loss": 0},
                 "weakest_action": {"action": "Perfect", "win_rate": 100},
@@ -92,6 +94,8 @@ class AIInsights:
         win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
         total_loss = sum(d["profit"] for d in history if d["profit"] < 0)
         total_profit_all = sum(d["profit"] for d in history)
+
+        self._log("SYSTEM", f"📊 Analytics summary: {total_trades} trades, {wins} wins, {losses} losses, {win_rate:.0f}% WR, ${total_profit_all:+.2f} P/L", detail={"total_trades": total_trades, "wins": wins, "losses": losses, "win_rate": round(win_rate, 1), "total_pnl": round(total_profit_all, 2), "best_symbol": best_symbol, "worst_symbol": worst_symbol})
 
         # ─── Recent Streak ─────────────────────────────────
         streak_type = "none"

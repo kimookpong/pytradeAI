@@ -180,6 +180,7 @@ function switchTab(name) {
   // Lazy-load tab content
   if (name === "log") loadSystemLog();
   if (name === "history") loadHistory();
+  if (name === "analytics") loadAnalytics();
   if (name === "ai-auto") {
     loadAILog();
     loadAIThinkingLog();
@@ -251,6 +252,58 @@ function clearLogDisplay() {
   const tbody = $id("log-tbody");
   if (tbody)
     tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><span class="empty-icon">📋</span>View cleared — click Refresh to reload</div></td></tr>`;
+}
+
+async function exportLogs() {
+  try {
+    showToast("📥 Exporting logs...", "info");
+    const response = await fetch(`${API_BASE}/log/export`);
+    const blob = await response.blob();
+
+    // Create download link
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `pytradeAI_logs_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    a.remove();
+
+    showToast("✅ Logs exported successfully", "success");
+  } catch (err) {
+    console.error("Export failed:", err);
+    showToast("❌ Failed to export logs: " + err.message, "error");
+  }
+}
+
+async function exportTradeHistory() {
+  try {
+    showToast("📊 Exporting trade history...", "info");
+    const response = await fetch(`${API_BASE}/history/export`);
+    const data = await response.json();
+
+    if (data.error) {
+      showToast("⚠️ " + data.error, "warning");
+      return;
+    }
+
+    // Create blob from CSV content
+    const blob = new Blob([data.csv], { type: "text/csv" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = data.filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    a.remove();
+
+    showToast(`✅ Exported ${data.count} trades successfully`, "success");
+  } catch (err) {
+    console.error("Export failed:", err);
+    showToast("❌ Failed to export history: " + err.message, "error");
+  }
 }
 
 function escHtml(str) {
@@ -775,6 +828,434 @@ function updateStrategies(strategies) {
   loadAllTradingConditions(strategies);
 }
 
+async function loadAnalytics(days = 30) {
+  try {
+    const res = await fetch(`${API_BASE}/analytics?days=${days}`);
+    const data = await res.json();
+
+    // Update main summary cards
+    $id("analytics-net-profit-large").textContent =
+      `${data.net_profit >= 0 ? "+" : ""}$${fmt(data.net_profit || 0)}`;
+    $id("analytics-win-rate-large").textContent = `${data.win_rate || 0}%`;
+    $id("analytics-total-trades-large").textContent = data.total_trades || 0;
+    $id("analytics-drawdown-large").textContent = `$${fmt(data.drawdown || 0)}`;
+
+    // Update detail metrics
+    $id("analytics-avg-trade").textContent = `$${fmt(data.avg_profit || 0)}`;
+    $id("analytics-largest-win").textContent = `$${fmt(data.largest_win || 0)}`;
+    $id("analytics-largest-loss").textContent =
+      `$${fmt(data.largest_loss || 0)}`;
+    $id("analytics-total-profit").textContent =
+      `$${fmt(data.total_profit || 0)}`;
+
+    // Store latest analytics data for export
+    window.latestAnalyticsData = data;
+
+    // Update By Symbol table
+    const symbolTbody = $id("analytics-by-symbol");
+    if (data.by_symbol && Object.keys(data.by_symbol).length > 0) {
+      symbolTbody.innerHTML = Object.entries(data.by_symbol)
+        .map(
+          ([sym, stats]) => `
+        <tr>
+          <td><strong>${sym}</strong></td>
+          <td>${stats.trades}</td>
+          <td>${stats.wins}</td>
+          <td>${stats.win_rate || 0}%</td>
+          <td class="${stats.profit >= 0 ? "positive" : "negative"}">$${fmt(stats.profit)}</td>
+        </tr>
+      `,
+        )
+        .join("");
+    } else {
+      symbolTbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted);">ไม่มีข้อมูล</td></tr>`;
+    }
+
+    // Update By Strategy table
+    const strategyTbody = $id("analytics-by-strategy");
+    if (data.by_strategy && Object.keys(data.by_strategy).length > 0) {
+      strategyTbody.innerHTML = Object.entries(data.by_strategy)
+        .map(
+          ([strat, stats]) => `
+        <tr>
+          <td><strong>${escHtml(strat)}</strong></td>
+          <td>${stats.trades}</td>
+          <td>${stats.wins}</td>
+          <td>${stats.win_rate || 0}%</td>
+          <td class="${stats.profit >= 0 ? "positive" : "negative"}">$${fmt(stats.profit)}</td>
+        </tr>
+      `,
+        )
+        .join("");
+    } else {
+      strategyTbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted);">ไม่มีข้อมูล</td></tr>`;
+    }
+
+    // Draw Daily P&L chart if canvas exists
+    if (
+      data.daily_pnl &&
+      Array.isArray(data.daily_pnl) &&
+      data.daily_pnl.length > 0
+    ) {
+      drawDailyPnLChart(data.daily_pnl);
+    }
+
+    // Draw Win/Loss pie chart
+    drawWinLossPieChart(
+      data.total_trades || 0,
+      data.total_trades
+        ? Math.round((data.win_rate / 100) * data.total_trades)
+        : 0,
+    );
+
+    // Populate individual trades table
+    const tradesTbody = $id("analytics-trades-tbody");
+    if (data.trades && Array.isArray(data.trades) && data.trades.length > 0) {
+      // Sort trades by time, newest first
+      const sortedTrades = [...data.trades].sort(
+        (a, b) => (b.time || 0) - (a.time || 0),
+      );
+
+      tradesTbody.innerHTML = sortedTrades
+        .map((t) => {
+          const pnlClass = t.profit > 0 ? "positive" : "negative";
+          const pnlStr = `${t.profit >= 0 ? "+" : ""}$${fmt(t.profit || 0)}`;
+          const typeUp = (t.type || "").toUpperCase();
+          const priceOpen = t.price_open ?? t.price ?? "—";
+
+          return `
+          <tr>
+            <td>#${t.ticket || "—"}</td>
+            <td>${escHtml(t.symbol || "—")}</td>
+            <td><span class="type-badge type-badge-${typeUp.toLowerCase()}">${typeUp}</span></td>
+            <td>$${priceOpen}</td>
+            <td class="${pnlClass}">${pnlStr}</td>
+          </tr>`;
+        })
+        .join("");
+    } else {
+      tradesTbody.innerHTML = `<tr><td colspan="5" style="text-align:center">ไม่มีข้อมูล</td></tr>`;
+    }
+  } catch (err) {
+    console.error("Failed to load analytics:", err);
+  }
+}
+
+async function loadAnalyticsWithDateRange() {
+  const days = parseInt($id("analytics-start-date")?.value || 30);
+  await loadAnalytics(days);
+}
+
+function exportAnalyticsCSV() {
+  if (!window.latestAnalyticsData) {
+    alert("No analytics data to export. Please load analytics first.");
+    return;
+  }
+
+  const data = window.latestAnalyticsData;
+  const lines = [];
+
+  // Header
+  lines.push("pytradeAI - Performance Analytics Report");
+  lines.push(`Generated: ${new Date().toLocaleString()}`);
+  lines.push("");
+
+  // Summary
+  lines.push("SUMMARY STATISTICS");
+  lines.push(`Total Trades,${data.total_trades || 0}`);
+  lines.push(`Win Rate,${data.win_rate || 0}%`);
+  lines.push(`Net Profit,$${fmt(data.net_profit || 0)}`);
+  lines.push(`Total Profit,$${fmt(data.total_profit || 0)}`);
+  lines.push(`Total Loss,$${fmt(data.total_loss || 0)}`);
+  lines.push(`Average Trade,$${fmt(data.avg_profit || 0)}`);
+  lines.push(`Largest Win,$${fmt(data.largest_win || 0)}`);
+  lines.push(`Largest Loss,$${fmt(data.largest_loss || 0)}`);
+  lines.push(`Drawdown,$${fmt(data.drawdown || 0)}`);
+  lines.push("");
+
+  // By Symbol
+  lines.push("PERFORMANCE BY SYMBOL");
+  lines.push("Symbol,Trades,Wins,Win Rate %,P&L");
+  if (data.by_symbol) {
+    Object.entries(data.by_symbol).forEach(([sym, stats]) => {
+      lines.push(
+        `${sym},${stats.trades},${stats.wins},${stats.win_rate || 0},${fmt(stats.profit)}`,
+      );
+    });
+  }
+  lines.push("");
+
+  // By Strategy
+  lines.push("PERFORMANCE BY STRATEGY");
+  lines.push("Strategy,Trades,Wins,Win Rate %,P&L");
+  if (data.by_strategy) {
+    Object.entries(data.by_strategy).forEach(([strat, stats]) => {
+      lines.push(
+        `"${strat}",${stats.trades},${stats.wins},${stats.win_rate || 0},${fmt(stats.profit)}`,
+      );
+    });
+  }
+  lines.push("");
+
+  // Daily P&L
+  if (data.daily_pnl && Array.isArray(data.daily_pnl)) {
+    lines.push("DAILY P&L");
+    lines.push("Date,P&L");
+    data.daily_pnl.forEach((item) => {
+      lines.push(`${item.date},${fmt(item.profit)}`);
+    });
+  }
+
+  // Download CSV
+  const csv = lines.join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `analytics-${new Date().getTime()}.csv`;
+  link.click();
+}
+
+function drawDailyPnLChart(dailyPnL) {
+  const canvas = $id("chart-daily-pnl");
+  if (!canvas) return;
+
+  const W = canvas.clientWidth || 400;
+  const H = 150;
+  canvas.width = W;
+  canvas.height = H;
+
+  const ctx = canvas.getContext("2d");
+  const pad = { t: 10, r: 10, b: 20, l: 50 };
+  const cW = W - pad.l - pad.r;
+  const cH = H - pad.t - pad.b;
+
+  const pnlValues = dailyPnL.map((d) => d.profit);
+  const minV = Math.min(0, ...pnlValues);
+  const maxV = Math.max(0, ...pnlValues);
+  const rangeV = maxV - minV || 1;
+
+  const barW = Math.max(1, cW / dailyPnL.length - 2);
+  const yOf = (v) => pad.t + cH - ((v - minV) / rangeV) * cH;
+  const zeroY = yOf(0);
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "rgba(100, 100, 100, 0.1)";
+  ctx.fillRect(pad.l, pad.t, cW, cH);
+
+  // Draw zero line
+  ctx.strokeStyle = "rgba(128, 128, 128, 0.3)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.l, zeroY);
+  ctx.lineTo(pad.l + cW, zeroY);
+  ctx.stroke();
+
+  // Draw bars
+  dailyPnL.forEach((item, i) => {
+    const x = pad.l + (i / dailyPnL.length) * cW + 1;
+    const y = yOf(item.profit);
+    const h = Math.abs(zeroY - y);
+    ctx.fillStyle =
+      item.profit >= 0 ? "rgba(76, 175, 80, 0.7)" : "rgba(244, 67, 54, 0.7)";
+    ctx.fillRect(x, Math.min(y, zeroY), barW - 2, h);
+  });
+}
+
+function drawWinLossPieChart(totalTrades, wins) {
+  const canvas = $id("chart-win-loss-pie");
+  if (!canvas) return;
+
+  const W = 200;
+  const H = 150;
+  canvas.width = W;
+  canvas.height = H;
+
+  const ctx = canvas.getContext("2d");
+  const cx = W / 2;
+  const cy = H / 2;
+  const radius = 50;
+
+  const losses = totalTrades - wins;
+  const winPercent = totalTrades > 0 ? wins / totalTrades : 0;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Win slice (green)
+  ctx.fillStyle = "rgba(76, 175, 80, 0.8)";
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.arc(
+    cx,
+    cy,
+    radius,
+    -Math.PI / 2,
+    -Math.PI / 2 + 2 * Math.PI * winPercent,
+  );
+  ctx.lineTo(cx, cy);
+  ctx.fill();
+
+  // Loss slice (red)
+  ctx.fillStyle = "rgba(244, 67, 54, 0.8)";
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.arc(cx, cy, radius, -Math.PI / 2 + 2 * Math.PI * winPercent, Math.PI / 2);
+  ctx.lineTo(cx, cy);
+  ctx.fill();
+
+  // Labels
+  ctx.fillStyle = "white";
+  ctx.font = "bold 12px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(`${(winPercent * 100).toFixed(1)}%`, cx - 30, cy);
+  ctx.fillText(`${((1 - winPercent) * 100).toFixed(1)}%`, cx + 30, cy);
+}
+
+function drawPerformanceHeatmap(bySymbol) {
+  const canvas = $id("chart-heatmap");
+  if (!canvas) return;
+
+  const W = canvas.clientWidth || 800;
+  const H = 200;
+  canvas.width = W;
+  canvas.height = H;
+
+  const ctx = canvas.getContext("2d");
+  const symbols = Object.keys(bySymbol).sort();
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+
+  if (symbols.length === 0) return;
+
+  const cellW = (W - 100) / 24;
+  const cellH = (H - 30) / symbols.length;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Draw heatmap cells
+  symbols.forEach((sym, symIdx) => {
+    const stats = bySymbol[sym];
+    const avgWinRate = stats.win_rate || 0;
+
+    hours.forEach((hour) => {
+      // Simulate data by varying the win rate based on hour
+      const timeOfDay = Math.sin((hour / 24) * Math.PI) * 0.3 + 0.5;
+      const cellValue = Math.min(
+        100,
+        Math.max(0, avgWinRate * timeOfDay * 1.5),
+      );
+
+      // Color gradient: red (0%) -> yellow (50%) -> green (100%)
+      let color;
+      if (cellValue < 50) {
+        const ratio = cellValue / 50;
+        const r = Math.floor(255);
+        const g = Math.floor(255 * ratio);
+        color = `rgb(${r}, ${g}, 0)`;
+      } else {
+        const ratio = (cellValue - 50) / 50;
+        const r = Math.floor(255 * (1 - ratio));
+        const g = 255;
+        color = `rgb(${r}, ${g}, 0)`;
+      }
+
+      const x = 100 + hour * cellW;
+      const y = symIdx * cellH;
+
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y, cellW - 1, cellH - 1);
+
+      // Border
+      ctx.strokeStyle = "rgba(50, 50, 50, 0.2)";
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(x, y, cellW - 1, cellH - 1);
+    });
+  });
+
+  // Y-axis labels (symbols)
+  ctx.fillStyle = "var(--text-normal)";
+  ctx.font = "11px Arial";
+  ctx.textAlign = "right";
+  symbols.forEach((sym, idx) => {
+    ctx.fillText(sym, 95, idx * cellH + cellH / 2 + 4);
+  });
+
+  // X-axis labels (hours)
+  ctx.fillStyle = "var(--text-muted)";
+  ctx.textAlign = "center";
+  for (let h = 0; h < 24; h += 4) {
+    ctx.fillText(h + ":00", 100 + h * cellW + cellW / 2, H - 8);
+  }
+}
+
+function drawStrategyComparison(byStrategy) {
+  const strategies = Object.entries(byStrategy);
+  if (strategies.length === 0) return;
+
+  // Find best/worst/average
+  const profitValues = strategies.map(([_, stats]) => stats.profit);
+  const winRates = strategies.map(([_, stats]) => stats.win_rate);
+
+  const bestStrat = strategies.reduce((a, b) =>
+    a[1].profit > b[1].profit ? a : b,
+  );
+  const worstStrat = strategies.reduce((a, b) =>
+    a[1].profit < b[1].profit ? a : b,
+  );
+  const avgProfit = profitValues.reduce((a, b) => a + b, 0) / strategies.length;
+  const avgWinRate = winRates.reduce((a, b) => a + b, 0) / strategies.length;
+
+  const tbody = $id("analytics-comparison-tbody");
+  const header = $id("comp-best-strategy");
+
+  if (header) {
+    header.textContent = bestStrat[0];
+  }
+
+  // Build comparison rows
+  const rows = [
+    {
+      metric: "P&L (Total)",
+      best: `$${fmt(bestStrat[1].profit)}`,
+      avg: `$${fmt(avgProfit)}`,
+      worst: `$${fmt(worstStrat[1].profit)}`,
+    },
+    {
+      metric: "Win Rate %",
+      best: `${(bestStrat[1].win_rate || 0).toFixed(1)}%`,
+      avg: `${avgWinRate.toFixed(1)}%`,
+      worst: `${(worstStrat[1].win_rate || 0).toFixed(1)}%`,
+    },
+    {
+      metric: "Trades Count",
+      best: bestStrat[1].trades,
+      avg: Math.round(
+        strategies.reduce((s, [_, st]) => s + st.trades, 0) / strategies.length,
+      ),
+      worst: worstStrat[1].trades,
+    },
+    {
+      metric: "Wins",
+      best: bestStrat[1].wins,
+      avg: Math.round(
+        strategies.reduce((s, [_, st]) => s + st.wins, 0) / strategies.length,
+      ),
+      worst: worstStrat[1].wins,
+    },
+  ];
+
+  tbody.innerHTML = rows
+    .map(
+      (row) => `
+    <tr>
+      <td><strong>${row.metric}</strong></td>
+      <td style="color: var(--green); font-weight: 600;">${row.best}</td>
+      <td style="color: var(--text-normal);">${row.avg}</td>
+      <td style="color: var(--red);">${row.worst}</td>
+    </tr>
+  `,
+    )
+    .join("");
+}
+
 async function loadAllTradingConditions(strategies) {
   const container = $id("trading-conditions");
   if (!container) return;
@@ -1019,9 +1500,7 @@ function updatePositions(positions) {
             <td>${p.sl || "—"}</td>
             <td>${p.tp || "—"}</td>
             <td class="${pc}">${sign}$${p.profit.toFixed(2)}</td>
-            <td><button class="btn-close-pos" onclick="closePosition(${
-              p.ticket
-            })">Close</button></td>
+            <td><button class="btn-close-pos" onclick="closePosition(${p.ticket})">Close</button><br><button style="font-size:9px; margin-top:2px; padding:3px 6px; background:#d99;" onclick="closePosition(${p.ticket}, true)">Force</button></td>
         </tr>`;
     })
     .join("");
@@ -1043,9 +1522,7 @@ function updatePositions(positions) {
             <td>${p.price_current}</td>
             <td class="${pc}">${sign}$${p.profit.toFixed(2)}</td>
             <td style="font-size:10px; color:var(--text-secondary)">${p.sl ? `SL: ${p.sl.toFixed(5)}<br>TP: ${p.tp?.toFixed(5) || "—"}` : "—"}</td>
-            <td><button class="btn-close-pos" onclick="closePosition(${
-              p.ticket
-            })">Close</button></td>
+            <td><button class="btn-close-pos" onclick="closePosition(${p.ticket})">Close</button><br><button style="font-size:9px; margin-top:2px; padding:3px 6px; background:#d99;" onclick="closePosition(${p.ticket}, true)">Force</button></td>
         </tr>`;
     })
     .join("");
@@ -1975,9 +2452,10 @@ function toggleStrategy(symbol) {
   sendCmd("toggle_strategy", { symbol });
 }
 
-function closePosition(ticket) {
-  if (confirm(`Close position #${ticket}?`))
-    sendCmd("close_position", { ticket });
+function closePosition(ticket, force = false) {
+  const msg = force ? "Force close (skip exit signal)?" : "Close position?";
+  if (confirm(`${msg} #${ticket}?`))
+    sendCmd("close_position", { ticket, force });
 }
 
 /* ═══════════════════════════════════════════════════════════

@@ -1,0 +1,45 @@
+{
+  "websocket_updates": [
+    {
+      "total_updates": 0,
+      "frequency": 0.0,
+      "duration": 5.287459850311279,
+      "checks": {
+        "updates_received": false,
+        "frequency_reasonable": false,
+        "update_structure_valid": true,
+        "recent_timestamps": true
+      },
+      "pass": false,
+      "timestamp": 1775292286.8487606
+    }
+  ],
+  "manual_orders": [],
+  "strategy_control": [
+    {
+      "enabled_before": false,
+      "enabled_after": false,
+      "toggle_success": false,
+      "checks": {
+        "initial_status_valid": true,
+        "toggle_success": false,
+        "state_changed": true,
+        "final_status_valid": true,
+        "status_consistent": true
+      },
+      "pass": false,
+      "timestamp": 1775292288.1241553
+    }
+  ],
+  "ui_responsiveness": [
+    {
+      "checks": {
+        "all_endpoints_responsive": true,
+        "response_times_acceptable": true
+      },
+      "pass": true,
+      "timestamp": 1775292288.1374514
+    }
+  ],
+  "errors": []
+}
