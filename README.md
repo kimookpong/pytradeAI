@@ -16,11 +16,11 @@
 
 ---
 
-## �️ Demo UI
+## Demo UI
 
 <div align="center">
 
-![pytradeAI Dashboard](screenshot.png)
+![pytradeAI Dashboard](images.png)
 
 _แดชบอร์ดหลัก — แสดง M5 Trading Conditions พร้อม RSI, ADX, BB และ Sparkline ของ BTCUSD · XAUUSD · ETHUSD_
 
@@ -28,7 +28,7 @@ _แดชบอร์ดหลัก — แสดง M5 Trading Conditions พ
 
 ---
 
-## �📖 ภาพรวม
+## ภาพรวม
 
 pytradeAI คือแพลตฟอร์มเทรดอัตโนมัติที่รันบน FastAPI + WebSocket พร้อมแดชบอร์ดเว็บแบบ real-time ระบบรองรับทั้งโหมด **Live MT5** (เชื่อมต่อ MetaTrader 5 จริง) และ **Simulation** (ทดสอบโดยไม่ต้องติดตั้ง MT5) มีเครื่องมือวิเคราะห์ทางเทคนิค, AI signal, Backtesting, และ Telegram notifications ครบในที่เดียว
 
