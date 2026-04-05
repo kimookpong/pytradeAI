@@ -22,7 +22,7 @@
 
 ![pytradeAI Dashboard](screenshot.png)
 
-*แดชบอร์ดหลัก — แสดง M5 Trading Conditions พร้อม RSI, ADX, BB และ Sparkline ของ BTCUSD · XAUUSD · ETHUSD*
+_แดชบอร์ดหลัก — แสดง M5 Trading Conditions พร้อม RSI, ADX, BB และ Sparkline ของ BTCUSD · XAUUSD · ETHUSD_
 
 </div>
 
@@ -397,4 +397,11 @@ pytradeAI/
 
 <div align="center">
 <sub>pytradeAI — Built with FastAPI · Exness MT5 · Minimax/Gemini AI</sub>
+
+---
+
+**👤 Owner / Developer**
+
+[![kimookpong](https://img.shields.io/badge/kimookpong-github.io-24292e?style=flat-square&logo=github)](https://kimookpong.github.io/)
+
 </div>
