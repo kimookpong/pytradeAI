@@ -26,27 +26,48 @@ DEFAULT_SETTINGS = {
     "gemini_model": "gemini-1.5-flash",
     "auto_trade_enabled": False,    # master switch
     "analysis_interval": 60,       # seconds between analyses
+    # sl_points / tp_points are in DOLLAR PIPS  (1 pip = $0.01).
+    # e.g. sl_points=200 → max loss $2.00  |  tp_points=200 → target $2.00
     "symbols": {
-        "EURUSD": {"auto_trade": False, "lot_size": 0.1, "sl_points": 20, "tp_points": 35, "max_trades": 1},
-        "GBPUSD": {"auto_trade": False, "lot_size": 0.1, "sl_points": 25, "tp_points": 40, "max_trades": 1},
-        "USDJPY": {"auto_trade": False, "lot_size": 0.1, "sl_points": 30, "tp_points": 50, "max_trades": 1},
-        "XAUUSD": {"auto_trade": False, "lot_size": 0.05, "sl_points": 100, "tp_points": 150, "max_trades": 1},
-        "BTCUSD": {"auto_trade": False, "lot_size": 0.01, "sl_points": 500, "tp_points": 800, "max_trades": 1},
-        "ETHUSD": {"auto_trade": False, "lot_size": 0.01, "sl_points": 300, "tp_points": 500, "max_trades": 1},
+        "XAUUSD": {"auto_trade": False, "lot_size": 0.01, "sl_points": 200, "tp_points": 200, "max_trades": 1},
+        "BTCUSD": {"auto_trade": False, "lot_size": 0.01, "sl_points": 200, "tp_points": 200, "max_trades": 1},
+        "ETHUSD": {"auto_trade": False, "lot_size": 0.1,  "sl_points": 100, "tp_points": 200, "max_trades": 1},
     },
 }
 
 
+SETTINGS_FILE = "ai_settings.json"
+
+
 def load_ai_settings() -> dict:
-    """Load AI settings from defaults (file-based persistence disabled - use localStorage)."""
-    # Always return defaults - frontend manages persistence via localStorage
-    return {k: v for k, v in DEFAULT_SETTINGS.items()}
+    """Load AI settings from file, falling back to defaults for missing keys."""
+    import copy
+    result = copy.deepcopy(DEFAULT_SETTINGS)
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+        # Deep-merge: top-level keys override defaults
+        for k, v in saved.items():
+            if k == "symbols" and isinstance(v, dict):
+                for sym, sym_cfg in v.items():
+                    if sym in result["symbols"]:  # only update known symbols — discard removed ones
+                        result["symbols"][sym].update(sym_cfg)
+            else:
+                result[k] = v
+    except FileNotFoundError:
+        pass  # first run — use defaults
+    except Exception as e:
+        print(f"[ai_engine] Warning: could not load {SETTINGS_FILE}: {e}")
+    return result
 
 
 def save_ai_settings(settings: dict):
-    """Save AI settings (currently no-op - frontend manages persistence via localStorage)."""
-    # Skip file writing - all persistence handled by frontend localStorage
-    pass
+    """Persist AI settings (including API keys) to disk."""
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2)
+    except Exception as e:
+        print(f"[ai_engine] Warning: could not save {SETTINGS_FILE}: {e}")
 
 
 # ─── AI Engine ──────────────────────────────────────────────────
@@ -529,18 +550,27 @@ Respond with ONLY valid JSON (no markdown, no explanation):
         
         trade_check["checks"]["max_trades"] = f"✓ {len(sym_positions)}/{max_trades} open"
 
-        # Place order
+        # Place order — convert dollar pips (1 pip = $0.01) to actual SL/TP price levels
         lot    = sym_cfg.get("lot_size", 0.01)
         sl_pts = sym_cfg.get("sl_points", 50)
         tp_pts = sym_cfg.get("tp_points", 80)
+
+        price_data = self.connector.get_symbol_price(symbol)
+        if not price_data:
+            self._log_thinking(symbol, "trade_failed", {"error": "Cannot get price for SL/TP calculation"})
+            return None
+        entry = price_data["ask"] if signal == "BUY" else price_data["bid"]
+        sl, tp = self.connector.pips_to_sl_tp(symbol, entry, sl_pts, tp_pts, signal, lot)
 
         trade_check["status"] = "EXECUTING"
         trade_check["order_params"] = {
             "symbol": symbol,
             "action": signal,
             "lot": lot,
-            "sl_pts": sl_pts,
-            "tp_pts": tp_pts
+            "sl_pips": sl_pts,
+            "tp_pips": tp_pts,
+            "sl_price": sl,
+            "tp_price": tp,
         }
         self._log_thinking(symbol, "trade_decision", trade_check)
 
@@ -548,12 +578,12 @@ Respond with ONLY valid JSON (no markdown, no explanation):
             symbol=symbol,
             order_type=signal,
             volume=lot,
-            sl=float(sl_pts),
-            tp=float(tp_pts),
+            sl=sl,
+            tp=tp,
             comment=f"AI:{analysis.get('provider','?')}:{confidence}%",
             timeframe="M5",
-            min_profit=0.0,  # AI trades use default, no min_profit trigger
-            sl_points=0.0,   # AI trades use default, no SL shifting
+            min_profit=0.0,
+            sl_points=0.0,
         )
 
         if result.success:

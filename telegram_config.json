@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "bot_token": "8347144691:AAHHA8W8C2vs9xt5uP0_aNL_rJWU_FWR8XM",
+  "chat_id": "5919166703",
+  "notify_open": true,
+  "notify_close": true,
+  "notify_strategy": true,
+  "notify_risk": true
+}

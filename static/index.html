@@ -53,11 +53,6 @@
                     <span>แดชบอร์ด</span>
                 </button>
 
-                <button class="nav-item" data-tab="trade" onclick="switchTab('trade')">
-                    <span class="nav-icon">💱</span>
-                    <span>เปิดออเดอร์</span>
-                </button>
-
                 <button class="nav-item" data-tab="positions" onclick="switchTab('positions')">
                     <span class="nav-icon">📋</span>
                     <span>พอร์ตเปิด</span>
@@ -83,11 +78,6 @@
                     <span>Backtesting</span>
                 </button>
 
-                <button class="nav-item" data-tab="strategies" onclick="switchTab('strategies')">
-                    <span class="nav-icon">⚙️</span>
-                    <span>กลยุทธ์</span>
-                </button>
-
                 <button class="nav-item" data-tab="ai-auto" onclick="switchTab('ai-auto')">
                     <span class="nav-icon">🤖</span>
                     <span>เทรดออโต้ AI</span>
@@ -96,6 +86,11 @@
                 <button class="nav-item" data-tab="log" onclick="switchTab('log')">
                     <span class="nav-icon">📜</span>
                     <span>บันทึกระบบ</span>
+                </button>
+
+                <button class="nav-item" data-tab="telegram" onclick="switchTab('telegram')">
+                    <span class="nav-icon">✈️</span>
+                    <span>Telegram</span>
                 </button>
             </div>
 
@@ -179,29 +174,16 @@
                     </div>
                 </div>
 
-                <!-- Combined Strategies + Conditions section -->
+                <!-- Trading Conditions section -->
                 <div class="section">
                     <div class="section-header">
                         <span class="section-title">
-                            <span class="section-icon">⚙️</span>กลยุทธ์และเงื่อนไขการเทรด
+                            <span class="section-icon">⚙️</span>เงื่อนไขการเทรด (M5)
                         </span>
                     </div>
                     <div class="section-body">
-                        <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 20px;">
-                            <!-- Strategies List -->
-                            <div>
-                                <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px;">กลยุทธ์</div>
-                                <div id="strategies-grid" style="display: flex; flex-direction: column; gap: 8px;">
-                                    <div class="empty-state"><span class="empty-icon">⏳</span>Loading…</div>
-                                </div>
-                            </div>
-                            <!-- Trading Conditions -->
-                            <div>
-                                <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px;">เงื่อนไขการเทรด (M5)</div>
-                                <div id="trading-conditions" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:10px">
-                                    <div class="empty-state"><span class="empty-icon">⏳</span>Loading…</div>
-                                </div>
-                            </div>
+                        <div id="trading-conditions" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:10px">
+                            <div class="empty-state"><span class="empty-icon">⏳</span>Loading…</div>
                         </div>
                     </div>
                 </div>
@@ -212,7 +194,16 @@
                         <span class="section-title">
                             <span class="section-icon">📋</span>พอร์ตที่เปิดอยู่
                         </span>
-                        <button class="btn btn-sm" onclick="switchTab('positions')">ดูทั้งหมด →</button>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-secondary); cursor:pointer;" title="เปิด/ปิดปุ่ม Force Close">
+                                <span>⚡ Force</span>
+                                <label class="toggle-switch" style="width:32px; height:18px;">
+                                    <input type="checkbox" id="toggle-force-close-dash" onchange="toggleForceClose()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </label>
+                            <button class="btn btn-sm" onclick="switchTab('positions')">ดูทั้งหมด →</button>
+                        </div>
                     </div>
                     <div class="tbl-wrap">
                         <table class="pos-table">
@@ -223,14 +214,16 @@
                                     <th>ล็อต</th>
                                     <th>ราคาเปิด</th>
                                     <th>ปัจจุบัน</th>
+                                    <th>Pips</th>
                                     <th>กำไร/ขาดทุน</th>
-                                    <th>SL / TP</th>
+                                    <th>🛑 หยุดขาดทุน</th>
+                                    <th>🎯 เป้าหมาย</th>
                                     <th></th>
                                 </tr>
                             </thead>
                             <tbody id="positions-body-dash">
                                 <tr id="no-positions-dash">
-                                    <td colspan="8">
+                                    <td colspan="10">
                                         <div class="empty-state">
                                             <span class="empty-icon">🗂️</span>ไม่มีพอร์ตที่เปิดอยู่
                                         </div>
@@ -242,115 +235,6 @@
                 </div>
             </section><!-- /tab-dashboard -->
 
-            <!-- ══ TAB: Manual Trade ════════════════════════════════ -->
-            <section id="tab-trade" class="tab-page">
-
-                <div class="page-header">
-                    <div>
-                        <h1 class="page-title">เปิดออเดอร์</h1>
-                        <p class="page-sub">เปิดออเดอร์ Market ด่วน</p>
-                    </div>
-                </div>
-
-                <div class="trade-shell">
-
-                    <!-- Order Form -->
-                    <div class="section trade-card">
-                        <div class="section-header">
-                            <span class="section-title"><span class="section-icon">💱</span>Order Entry</span>
-                        </div>
-                        <div class="section-body trade-form-col">
-
-                            <!-- Instrument selector -->
-                            <div class="trade-field">
-                                <label class="trade-lbl">คู่สกุลเงิน</label>
-                                <select id="trade-symbol" class="trade-select" onchange="onSymbolChange()">
-                                    <option value="BTCUSD" selected>₿ BTCUSD</option>
-                                    <option value="EURUSD">🇪🇺 EURUSD</option>
-                                    <option value="GBPUSD">🇬🇧 GBPUSD</option>
-                                    <option value="USDJPY">🇯🇵 USDJPY</option>
-                                    <option value="XAUUSD">🥇 XAUUSD</option>
-                                    <option value="ETHUSD">Ξ ETHUSD</option>
-                                </select>
-                            </div>
-
-                            <!-- BID / ASK price block -->
-                            <div class="price-display-row">
-                                <div class="price-half bid-side">
-                                    <span class="price-tag">BID</span>
-                                    <span id="trade-bid" class="price-num bid-num">—</span>
-                                </div>
-                                <div class="price-divider"></div>
-                                <div class="price-half ask-side">
-                                    <span class="price-tag">ASK</span>
-                                    <span id="trade-ask" class="price-num ask-num">—</span>
-                                </div>
-                            </div>
-
-                            <!-- Inputs -->
-                            <div class="trade-inputs-grid">
-                                <div class="trade-field">
-                                    <label class="trade-lbl">ปริมาณ (ล็อต)</label>
-                                    <input id="trade-volume" class="trade-input" type="number"
-                                           value="0.01" min="0.01" max="10" step="0.01" />
-                                </div>
-                                <div class="trade-field">
-                                    <label class="trade-lbl">หยุดขาดทุน (จุด)</label>
-                                    <input id="trade-sl" class="trade-input" type="number"
-                                           value="100" min="0" step="1" />
-                                </div>
-                                <div class="trade-field">
-                                    <label class="trade-lbl">เป้าหมายกำไร (จุด)</label>
-                                    <input id="trade-tp" class="trade-input" type="number"
-                                           value="200" min="0" step="1" />
-                                </div>
-                            </div>
-
-                            <!-- BUY / SELL -->
-                            <div class="trade-actions">
-                                <button class="btn-buy" onclick="placeOrder('BUY')">▲&nbsp;BUY</button>
-                                <button class="btn-sell" onclick="placeOrder('SELL')">▼&nbsp;SELL</button>
-                            </div>
-
-                        </div>
-                    </div><!-- /trade-card -->
-
-                    <!-- Info sidebar -->
-                    <div class="trade-info-col">
-                        <div class="info-block">
-                            <div class="info-block-title">ข้อมูลออเดอร์</div>
-                            <div class="info-row">
-                                <span class="info-key">สัญลักษณ์</span>
-                                <span id="info-symbol" class="info-val">EURUSD</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-key">ส่วนต่าง</span>
-                                <span id="info-spread" class="info-val">—</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-key">รูปแบบ</span>
-                                <span class="info-val">ตลาด</span>
-                            </div>
-                        </div>
-                        <div class="info-block">
-                            <div class="info-block-title">บัญชี</div>
-                            <div class="info-row">
-                                <span class="info-key">ยอดเงิน</span>
-                                <span id="trade-acct-balance" class="info-val">—</span>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-key">มูลค่ารวม</span>
-                                <span id="trade-acct-equity" class="info-val">—</span>
-                            </div>
-                        </div>
-                    </div>
-
-                </div><!-- /trade-shell -->
-
-            </section><!-- /tab-trade -->
-
-
-
             <!-- ══ TAB: Positions ══════════════════════════════════ -->
             <section id="tab-positions" class="tab-page">
 
@@ -358,6 +242,15 @@
                     <div>
                         <h1 class="page-title">พอร์ตที่เปิดอยู่</h1>
                         <p class="page-sub">สถานะออเดอร์แบบเรียลไทม์</p>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-secondary); cursor:pointer;" title="เปิด/ปิดปุ่ม Force Close บนตาราง">
+                            <span>⚡ Force Close</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="toggle-force-close" onchange="toggleForceClose()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </label>
                     </div>
                 </div>
 
@@ -374,15 +267,16 @@
                                     <th>ล็อต</th>
                                     <th>ราคาเปิด</th>
                                     <th>ราคาปัจจุบัน</th>
-                                    <th>หยุดขาดทุน</th>
-                                    <th>เป้าหมาย</th>
+                                    <th>Pips</th>
+                                    <th>🛑 หยุดขาดทุน</th>
+                                    <th>🎯 เป้าหมาย</th>
                                     <th>กำไร/ขาดทุน</th>
                                     <th></th>
                                 </tr>
                             </thead>
                             <tbody id="positions-body">
                                 <tr id="no-positions">
-                                    <td colspan="9">
+                                    <td colspan="10">
                                         <div class="empty-state">
                                             <span class="empty-icon">🗂️</span>
                                             ไม่มีพอร์ตที่เปิดอยู่
@@ -579,7 +473,7 @@
                     <div class="page-header-actions" style="display: flex; gap: 8px; align-items: center;">
                         <div style="display: flex; gap: 6px; align-items: center;">
                             <label style="font-size: 0.8rem;">ช่วง:</label>
-                            <input type="number" id="analytics-start-date" min="1" max="365" value="30" style="width: 50px; padding: 6px; border: 1px solid var(--border-subtle); border-radius: 4px;">
+                            <input type="number" id="analytics-start-date" min="1" max="365" value="30" style="width: 50px; padding: 6px; background: var(--bg-input); border: 1px solid var(--border-subtle); border-radius: 4px; color: var(--text-primary);">
                             <span style="font-size: 0.75rem; color: var(--text-muted);">วัน</span>
                         </div>
                         <button class="btn btn-sm btn-cyan" onclick="loadAnalyticsWithDateRange()">🔄 โหลด</button>
@@ -956,34 +850,33 @@
                             grid-template-columns: 1fr;
                         }
                     }
-                </style>
-                    
+
                     .analytics-charts-row {
                         display: grid;
                         grid-template-columns: 1fr;
                         gap: 16px;
                         margin-bottom: 20px;
                     }
-                    
+
                     .analytics-chart-panel {
                         background: var(--bg-card);
                         border: 1px solid var(--border-subtle);
                         border-radius: 8px;
                         padding: 16px;
                     }
-                    
+
                     .analytics-chart-panel h3 {
                         margin: 0 0 12px 0;
                         font-size: 0.9rem;
                         color: var(--text-normal);
                     }
-                    
+
                     .analytics-tables-row {
                         display: grid;
                         grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
                         gap: 16px;
                     }
-                    
+
                     .analytics-table-panel {
                         background: var(--bg-card);
                         border: 1px solid var(--border-subtle);
@@ -991,39 +884,39 @@
                         padding: 12px;
                         overflow-x: auto;
                     }
-                    
+
                     .analytics-table-panel h3 {
                         margin: 0 0 12px 0;
                         font-size: 0.9rem;
                         color: var(--text-normal);
                     }
-                    
+
                     .analytics-table {
                         width: 100%;
                         border-collapse: collapse;
                         font-size: 0.8rem;
                     }
-                    
+
                     .analytics-table thead {
                         border-bottom: 1px solid var(--border-subtle);
                     }
-                    
+
                     .analytics-table th {
                         padding: 6px;
                         text-align: left;
                         color: var(--text-muted);
                         font-weight: 600;
                     }
-                    
+
                     .analytics-table td {
                         padding: 6px;
                         border-bottom: 1px solid var(--border-subtle);
                     }
-                    
+
                     .analytics-table tbody tr:hover {
                         background: var(--bg-hover);
                     }
-                    
+
                     .analytics-heatmap-panel {
                         background: var(--bg-card);
                         border: 1px solid var(--border-subtle);
@@ -1031,13 +924,13 @@
                         padding: 16px;
                         margin-bottom: 20px;
                     }
-                    
+
                     .analytics-heatmap-panel h3 {
                         margin: 0 0 12px 0;
                         font-size: 0.9rem;
                         color: var(--text-normal);
                     }
-                    
+
                     .analytics-comparison-panel {
                         background: var(--bg-card);
                         border: 1px solid var(--border-subtle);
@@ -1045,40 +938,40 @@
                         padding: 16px;
                         margin-top: 20px;
                     }
-                    
+
                     .analytics-comparison-panel h3 {
                         margin: 0 0 12px 0;
                         font-size: 0.9rem;
                         color: var(--text-normal);
                     }
-                    
+
                     .analytics-comparison-table {
                         width: 100%;
                         border-collapse: collapse;
                         font-size: 0.8rem;
                     }
-                    
+
                     .analytics-comparison-table thead {
                         background: var(--bg-hover);
                         border-bottom: 2px solid var(--border-subtle);
                     }
-                    
+
                     .analytics-comparison-table th {
                         padding: 8px;
                         text-align: left;
                         color: var(--text-bright);
                         font-weight: 600;
                     }
-                    
+
                     .analytics-comparison-table td {
                         padding: 6px 8px;
                         border-bottom: 1px solid var(--border-subtle);
                     }
-                    
+
                     .analytics-comparison-table tbody tr:hover {
                         background: var(--bg-hover);
                     }
-                    
+
                     /* Analytics Trades Detail Panel */
                     .analytics-trades-panel {
                         background: var(--bg-card);
@@ -1088,45 +981,45 @@
                         margin-bottom: 20px;
                         margin-top: 20px;
                     }
-                    
+
                     .analytics-trades-panel h3 {
                         margin: 0 0 12px 0;
                         font-size: 0.9rem;
                         color: var(--text-normal);
                     }
-                    
+
                     .analytics-trades-table {
                         width: 100%;
                         border-collapse: collapse;
                         font-size: 0.8rem;
                     }
-                    
+
                     .analytics-trades-table thead {
                         background: var(--bg-hover);
                         border-bottom: 2px solid var(--border-subtle);
                     }
-                    
+
                     .analytics-trades-table th {
                         padding: 8px;
                         text-align: left;
                         color: var(--text-bright);
                         font-weight: 600;
                     }
-                    
+
                     .analytics-trades-table td {
                         padding: 8px;
                         border-bottom: 1px solid var(--border-subtle);
                     }
-                    
+
                     .analytics-trades-table tbody tr:hover {
                         background: var(--bg-hover);
                     }
-                    
+
                     .analytics-pnl-positive {
                         color: var(--green);
                         font-weight: 500;
                     }
-                    
+
                     .analytics-pnl-negative {
                         color: var(--red);
                         font-weight: 500;
@@ -1134,30 +1027,6 @@
                 </style>
 
             </section><!-- /tab-analytics -->
-
-            <!-- ══ TAB: Strategies ════════════════════════════════= -->
-            <section id="tab-strategies" class="tab-page">
-
-                <div class="page-header">
-                    <div>
-                        <h1 class="page-title">กลยุทธ์</h1>
-                        <p class="page-sub">เปิด/ปิดการเทรดอัตโนมัติรายสัญลักษณ์</p>
-                    </div>
-                    <button class="btn btn-sm btn-cyan" onclick="openAISettings()">⚙️ ตั้งค่า AI</button>
-                </div>
-
-                <div class="section">
-                    <div class="section-header">
-                        <span class="section-title"><span class="section-icon">📡</span>กลยุทธ์รายสัญลักษณ์</span>
-                    </div>
-                    <div class="section-body">
-                        <div id="strategies-grid-full">
-                            <div class="empty-state"><span class="empty-icon">⏳</span>Loading…</div>
-                        </div>
-                    </div>
-                </div>
-
-            </section><!-- /tab-strategies -->
 
             <!-- ══ TAB: AI Auto Trade ══════════════════════════════ -->
             <section id="tab-ai-auto" class="tab-page">
@@ -1258,7 +1127,7 @@
                         <button class="btn btn-sm" onclick="loadSystemLog()">↺ รีเฟรช</button>
                         <button class="btn btn-sm" onclick="exportLogs()">📥 ส่งออกบันทึก</button>
                         <button class="btn btn-sm" onclick="exportTradeHistory()">📊 ส่งออกประวัติการเทรด</button>
-                        <button class="btn btn-sm btn-danger" onclick="clearLogDisplay()">🗑 ล้างหน้าจอ</button>
+                        <button class="btn btn-sm btn-danger" onclick="clearLogHistory()">🗑 ลบประวัติ</button>
                     </div>
                 </div>
                 <div class="section">
@@ -1280,6 +1149,164 @@
                 </div>
             </section><!-- /tab-log -->
 
+            <!-- ══ TAB: Telegram ══════════════════════════════════ -->
+            <section id="tab-telegram" class="tab-page">
+                <div class="page-header">
+                    <div>
+                        <h1 class="page-title">✈️ Telegram Notifications</h1>
+                        <p class="page-sub">รับการแจ้งเตือนการเทรดแบบ Real-time ผ่าน Telegram Bot</p>
+                    </div>
+                    <div class="page-header-actions">
+                        <button class="btn btn-sm" onclick="loadTelegramSettings()">↺ รีเฟรช</button>
+                    </div>
+                </div>
+
+                <!-- Status banner -->
+                <div id="tg-status-banner" class="section" style="margin-bottom:12px;display:none">
+                    <div class="section-body" style="padding:12px 16px">
+                        <span id="tg-status-text" style="font-size:14px"></span>
+                    </div>
+                </div>
+
+                <!-- Master enable toggle -->
+                <div class="section" style="margin-bottom:12px">
+                    <div class="section-header">
+                        <span class="section-title">สถานะ</span>
+                    </div>
+                    <div class="section-body">
+                        <div style="display:flex;align-items:center;gap:14px">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="tg-enabled" onchange="saveTelegramSettings()">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span id="tg-enabled-label" style="font-size:14px;color:var(--text-dim)">ปิดใช้งาน</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bot credentials -->
+                <div class="section" style="margin-bottom:12px">
+                    <div class="section-header">
+                        <span class="section-title">🔑 ข้อมูลการเชื่อมต่อ</span>
+                    </div>
+                    <div class="section-body">
+                        <div class="form-group" style="margin-bottom:12px">
+                            <label class="form-label">Bot Token
+                                <span style="color:var(--text-muted);font-weight:400;margin-left:6px">
+                                    (ได้จาก <a href="https://t.me/BotFather" target="_blank" style="color:var(--accent-blue)">@BotFather</a>)
+                                </span>
+                            </label>
+                            <div style="display:flex;gap:8px">
+                                <input id="tg-token" class="form-input" type="password"
+                                    placeholder="123456789:AABBCCddEEFF..." style="flex:1">
+                                <button class="btn btn-sm" onclick="toggleTgTokenVisibility()"
+                                    id="tg-token-eye" title="แสดง/ซ่อน token">👁</button>
+                            </div>
+                            <div id="tg-token-saved" style="font-size:11px;color:var(--accent-green);margin-top:4px;display:none">
+                                ✅ Token บันทึกแล้ว
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom:12px">
+                            <label class="form-label">Chat ID
+                                <span style="color:var(--text-muted);font-weight:400;margin-left:6px">
+                                    (ได้จาก <a href="https://t.me/userinfobot" target="_blank" style="color:var(--accent-blue)">@userinfobot</a>)
+                                </span>
+                            </label>
+                            <input id="tg-chat-id" class="form-input" type="text"
+                                placeholder="-100123456789 หรือ @channelname">
+                        </div>
+
+                        <div style="display:flex;gap:8px;margin-top:8px">
+                            <button class="btn btn-primary" onclick="saveTelegramSettings()" style="flex:1;justify-content:center">
+                                💾 บันทึก
+                            </button>
+                            <button class="btn btn-sm" onclick="testTelegram()" id="tg-test-btn"
+                                style="padding:10px 18px">
+                                📤 ทดสอบส่งข้อความ
+                            </button>
+                        </div>
+                        <div id="tg-test-result" style="margin-top:8px;font-size:13px;display:none"></div>
+                    </div>
+                </div>
+
+                <!-- Notification types -->
+                <div class="section">
+                    <div class="section-header">
+                        <span class="section-title">🔔 ประเภทการแจ้งเตือน</span>
+                    </div>
+                    <div class="section-body">
+                        <div style="display:flex;flex-direction:column;gap:14px">
+
+                            <div style="display:flex;align-items:center;gap:14px">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="tg-notify-open" onchange="saveTelegramSettings()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <div>
+                                    <div style="font-size:14px;font-weight:600">🟢 เปิด Order</div>
+                                    <div style="font-size:12px;color:var(--text-dim)">แจ้งเตือนทุกครั้งที่มีการเปิด Order ใหม่</div>
+                                </div>
+                            </div>
+
+                            <div style="display:flex;align-items:center;gap:14px">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="tg-notify-close" onchange="saveTelegramSettings()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <div>
+                                    <div style="font-size:14px;font-weight:600">🔴 ปิด Order</div>
+                                    <div style="font-size:12px;color:var(--text-dim)">แจ้งเตือนเมื่อปิด Order พร้อม P&amp;L</div>
+                                </div>
+                            </div>
+
+                            <div style="display:flex;align-items:center;gap:14px">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="tg-notify-strategy" onchange="saveTelegramSettings()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <div>
+                                    <div style="font-size:14px;font-weight:600">⚙️ เปลี่ยนกลยุทธ์</div>
+                                    <div style="font-size:12px;color:var(--text-dim)">แจ้งเตือนเมื่อเปิด/ปิด Strategy หรือ System</div>
+                                </div>
+                            </div>
+
+                            <div style="display:flex;align-items:center;gap:14px">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="tg-notify-risk" onchange="saveTelegramSettings()">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <div>
+                                    <div style="font-size:14px;font-weight:600">⚠️ Risk Alert</div>
+                                    <div style="font-size:12px;color:var(--text-dim)">แจ้งเตือนเมื่อระบบหยุดเทรดเนื่องจาก Daily Loss / Consecutive Losses</div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+
+                <!-- How-to guide -->
+                <div class="section" style="margin-top:12px">
+                    <div class="section-header">
+                        <span class="section-title">📖 วิธีสร้าง Telegram Bot</span>
+                        <button class="btn btn-sm" onclick="toggleTgGuide()" id="tg-guide-btn">แสดง</button>
+                    </div>
+                    <div id="tg-guide" class="section-body" style="display:none;font-size:13px;line-height:1.8">
+                        <ol style="padding-left:20px;color:var(--text-secondary)">
+                            <li>เปิด Telegram แล้วค้นหา <b>@BotFather</b></li>
+                            <li>พิมพ์ <code>/newbot</code> และตั้งชื่อ Bot</li>
+                            <li>คัดลอก <b>Bot Token</b> ที่ได้รับ (รูปแบบ: <code>123456789:AABBcc...</code>)</li>
+                            <li>เริ่มแชทกับ Bot ของคุณ หรือเพิ่มเข้า Group/Channel</li>
+                            <li>เปิด <a href="https://t.me/userinfobot" target="_blank" style="color:var(--accent-blue)">@userinfobot</a> เพื่อดู <b>Chat ID</b> ของคุณ</li>
+                            <li>กรอก Token และ Chat ID ด้านบน แล้วกด <b>บันทึก</b></li>
+                            <li>กด <b>ทดสอบส่งข้อความ</b> เพื่อยืนยันการเชื่อมต่อ</li>
+                        </ol>
+                    </div>
+                </div>
+
+            </section><!-- /tab-telegram -->
+
         </main><!-- /main-panel -->
     </div><!-- /app-body -->
 </div><!-- /app-shell -->
@@ -1293,6 +1320,12 @@
         <div class="modal-head">
             <span class="modal-title">⚡ MT5 Connection</span>
             <button class="modal-close" onclick="closeMT5Panel()">✕</button>
+        </div>
+
+        <!-- Auto-login notice (shown when not connected on startup) -->
+        <div id="mt5-login-notice" class="mt5-login-notice" style="display:none">
+            <span class="mt5-login-notice-icon">🔌</span>
+            <span>ยังไม่ได้เชื่อมต่อ MT5 — กรุณากรอก Login เพื่อใช้งาน</span>
         </div>
 
         <!-- Tabs -->

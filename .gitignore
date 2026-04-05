@@ -7,7 +7,8 @@ __pycache__/
 *.pyd
 
 # Security & Credentials (ห้าม Commit เด็ดขาด)
-# NOTE: Configuration now managed by frontend localStorage - no file persistence
+ai_settings.json
+mt5_accounts.json
 .env
 
 # Logs & Temporary Files

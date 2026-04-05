@@ -4,21 +4,11 @@
    ═══════════════════════════════════════════════════════════ */
 
 // ─── Config ──────────────────────────────────────────────────
-const WS_URL = `ws://${window.location.host}/ws`;
-const API_BASE = `http://${window.location.host}/api`;
-
-// ─── State ───────────────────────────────────────────────────
-let ws = null;
-let systemActive = false;
-let reconnectAttempts = 0;
-let latestPrices = {}; // { BTCUSD: {bid,ask,spread}, ... }
-let aiSettingsCache = []; // latest AI settings from server
-let currentProvider = "minimax"; // active AI provider selection
-let aiThinkingLog = []; // AI reasoning/thinking process log
-const MAX_RECONNECT = 50;
+const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws`;
+const API_BASE = `${window.location.origin}/api`;
 
 // ─── Constants ───────────────────────────────────────────────
-const SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "BTCUSD", "ETHUSD"];
+const SYMBOLS = ["BTCUSD", "XAUUSD", "ETHUSD"];
 
 // ─── LocalStorage Management ──────────────────────────────────
 const StorageKeys = {
@@ -28,6 +18,7 @@ const StorageKeys = {
   SYSTEM_LOG: "pytrade_system_log",
   AI_THINKING_LOG: "pytrade_ai_thinking_log",
   TODAY_TRADES: "pytrade_today_trades",
+  FORCE_CLOSE_ENABLED: "pytrade_force_close_enabled",
 };
 
 function storage_get(key, defaultValue = null) {
@@ -58,8 +49,43 @@ function storage_append_log(key, entry, maxSize = 500) {
   return log;
 }
 
+// ─── State ───────────────────────────────────────────────────
+let ws = null;
+let systemActive = false;
+let reconnectAttempts = 0;
+let latestPrices = {}; // { BTCUSD: {bid,ask,spread}, ... }
+let pipValues = {}; // { BTCUSD: 1.0, EURUSD: 0.00001, ... } - fetched from MT5 backend
+let aiSettingsCache = []; // latest AI settings from server
+let currentProvider = "minimax"; // active AI provider selection
+let aiThinkingLog = []; // AI reasoning/thinking process log
+let _loginRequired = false; // true when MT5 not connected — modal cannot be dismissed
+let forceCloseEnabled = storage_get(StorageKeys.FORCE_CLOSE_ENABLED, true); // whether ⚡ Force button is shown
+const MAX_RECONNECT = 50;
+
 // ─── DOM helpers ─────────────────────────────────────────────
 const $id = (id) => document.getElementById(id);
+
+// ─── Load Pip Values from MT5 Backend ─────────────────────
+async function loadPipValues() {
+  try {
+    const res = await fetch(`${API_BASE}/pip-values`);
+    pipValues = await res.json();
+    console.log("✅ Pip values loaded from MT5:", pipValues);
+  } catch (err) {
+    console.warn("⚠️ Failed to load pip values from API, using defaults:", err);
+    // Keep defaults from getPipValue function
+  }
+}
+
+// Call on page load
+document.addEventListener("DOMContentLoaded", () => {
+  loadPipValues();
+  // Restore Force Close toggle state from localStorage
+  const t1 = $id("toggle-force-close");
+  const t2 = $id("toggle-force-close-dash");
+  if (t1) t1.checked = forceCloseEnabled;
+  if (t2) t2.checked = forceCloseEnabled;
+});
 
 /* ═══════════════════════════════════════════════════════════
    WebSocket
@@ -181,6 +207,7 @@ function switchTab(name) {
   if (name === "log") loadSystemLog();
   if (name === "history") loadHistory();
   if (name === "analytics") loadAnalytics();
+  if (name === "telegram") loadTelegramSettings();
   if (name === "ai-auto") {
     loadAILog();
     loadAIThinkingLog();
@@ -206,6 +233,64 @@ function switchMT5Tab(name) {
    System Log
    ═══════════════════════════════════════════════════════════ */
 
+// Fields that add noise and are skipped in the detail display
+const _DETAIL_SKIP = new Set(["action", "bars", "trades"]);
+
+// Label overrides for common field names
+const _DETAIL_LABELS = {
+  rsi: "RSI",
+  ma_fast: "MA Fast",
+  ma_slow: "MA Slow",
+  upper_band: "BB↑",
+  lower_band: "BB↓",
+  buy_count: "buy✓",
+  sell_count: "sell✓",
+  sl: "SL",
+  tp: "TP",
+  entry: "entry",
+  profit: "P&L",
+  pnl: "P&L",
+  volume: "lot",
+  ticket: "#",
+  cooldown: "cooldown",
+};
+
+function _fmtDetail(detail) {
+  if (!detail) return "";
+  if (typeof detail === "string") return escHtml(detail);
+  if (typeof detail !== "object") return escHtml(String(detail));
+
+  return Object.entries(detail)
+    .filter(([k]) => !_DETAIL_SKIP.has(k))
+    .map(([k, v]) => {
+      const label = escHtml(_DETAIL_LABELS[k] ?? k.replace(/_/g, "\u00A0"));
+      let vs = escHtml(String(v ?? ""));
+      let cls = "log-v";
+
+      // Color profit / P&L
+      if ((k === "profit" || k === "pnl") && typeof v === "number") {
+        cls = v >= 0 ? "log-v log-v-pos" : "log-v log-v-neg";
+        vs = (v >= 0 ? "+" : "") + vs;
+      }
+      // Color signal / order type
+      if ((k === "signal" || k === "type") && typeof v === "string") {
+        cls =
+          v === "BUY"
+            ? "log-v log-v-buy"
+            : v === "SELL"
+              ? "log-v log-v-sell"
+              : cls;
+      }
+      // Round long decimals
+      if (typeof v === "number" && !Number.isInteger(v)) {
+        vs = escHtml(String(Math.round(v * 1e5) / 1e5));
+      }
+
+      return `<span class="log-kv"><span class="log-k">${label}</span><span class="${cls}">${vs}</span></span>`;
+    })
+    .join("");
+}
+
 async function loadSystemLog() {
   const tbody = $id("log-tbody");
   if (!tbody) return;
@@ -224,7 +309,7 @@ async function loadSystemLog() {
           <td class="log-time">${e.date} ${e.ts}</td>
           <td class="log-cat-cell"><span class="log-cat log-cat-${e.category.toLowerCase()}">${e.icon} ${e.category}</span></td>
           <td class="log-message">${escHtml(e.message)}</td>
-          <td class="log-detail">${escHtml(e.detail || "")}</td>
+          <td class="log-detail">${_fmtDetail(e.detail)}</td>
         </tr>`,
       )
       .join("");
@@ -244,7 +329,7 @@ function prependLogEntry(e) {
     <td class="log-time">${e.date} ${e.ts}</td>
     <td class="log-cat-cell"><span class="log-cat log-cat-${e.category.toLowerCase()}">${e.icon} ${e.category}</span></td>
     <td class="log-message">${escHtml(e.message)}</td>
-    <td class="log-detail">${escHtml(e.detail || "")}</td>`;
+    <td class="log-detail">${_fmtDetail(e.detail)}</td>`;
   tbody.prepend(tr);
 }
 
@@ -252,6 +337,19 @@ function clearLogDisplay() {
   const tbody = $id("log-tbody");
   if (tbody)
     tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><span class="empty-icon">📋</span>View cleared — click Refresh to reload</div></td></tr>`;
+}
+
+async function clearLogHistory() {
+  if (!confirm("ลบบันทึกระบบทั้งหมด?\nการดำเนินการนี้ไม่สามารถย้อนกลับได้"))
+    return;
+  try {
+    const res = await fetch(`${API_BASE}/log`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await res.text());
+    clearLogDisplay();
+    showToast("🗑 ลบบันทึกระบบเรียบร้อยแล้ว", "success");
+  } catch (err) {
+    showToast("❌ ลบบันทึกไม่สำเร็จ: " + err.message, "error");
+  }
 }
 
 async function exportLogs() {
@@ -400,9 +498,11 @@ function updateTodayHistoryStats(allTrades) {
     new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
   const todayEnd = todayStart + 86400; // 24 hours
 
-  const todayTrades = allTrades.filter(
-    (t) => t.time >= todayStart && t.time < todayEnd,
-  );
+  const todayTrades = allTrades.filter((t) => {
+    // Use close_time when available (trade closed today), fallback to open time
+    const tradeTime = t.close_time > 0 ? t.close_time : t.time;
+    return tradeTime >= todayStart && tradeTime < todayEnd;
+  });
 
   // Calculate today's stats
   const todayWins = todayTrades.filter((t) => t.profit > 0).length;
@@ -661,12 +761,6 @@ function updateDashboard(data) {
     // Dashboard balance stat card
     const dashBal = $id("dash-balance");
     if (dashBal) animateValue(dashBal, balFmt);
-
-    // Trade tab account info panel
-    const trBal = $id("trade-acct-balance");
-    if (trBal) trBal.textContent = balFmt;
-    const trEq = $id("trade-acct-equity");
-    if (trEq) trEq.textContent = eqFmt;
   }
   // Insights
   if (data.insights) {
@@ -694,7 +788,6 @@ function updateDashboard(data) {
   if (data.prices) {
     latestPrices = data.prices;
     updateTickerBar(data.prices);
-    updateTradePriceDisplay();
   }
   // AI Auto-Trade
   if (data.ai_analysis !== undefined) updateAIAutoTab(data);
@@ -707,10 +800,7 @@ function updateDashboard(data) {
 const SYMBOL_ICONS = {
   BTCUSD: "₿",
   XAUUSD: "⚜️",
-  USDJPY: "¥",
   ETHUSD: "Ξ",
-  EURUSD: "€",
-  GBPUSD: "£",
 };
 
 function updateTickerBar(prices) {
@@ -764,67 +854,18 @@ function updateTickerBar(prices) {
   }
 }
 
-function updateTradePriceDisplay() {
-  const sym = $id("trade-symbol")?.value;
-  if (!sym || !latestPrices[sym]) return;
-  const p = latestPrices[sym];
-  const digits = sym.includes("JPY")
-    ? 3
-    : sym.includes("BTC") || sym.includes("ETH") || sym.includes("XAU")
-      ? 2
-      : 5;
-  $id("trade-bid").textContent = p.bid.toFixed(digits);
-  $id("trade-ask").textContent = p.ask.toFixed(digits);
-}
-
-function onSymbolChange() {
-  updateTradePriceDisplay();
-}
-
 /* ═══════════════════════════════════════════════════════════
    Strategies Grid
    ═══════════════════════════════════════════════════════════ */
 
-function _buildStrategyHTML(s, suffix) {
-  return `
-    <div class="strategy-item" id="strat-${suffix}-${s.symbol}">
-        <div class="strategy-info">
-            <span class="strategy-icon">${s.icon}</span>
-            <div>
-                <div class="strategy-name">${s.symbol}</div>
-                <div class="strategy-detail">${s.name || ""}</div>
-            </div>
-        </div>
-        <button class="strategy-toggle ${s.enabled ? "on" : ""}"
-                onclick="toggleStrategy('${s.symbol}')"
-                id="strat-toggle-${suffix}-${s.symbol}">
-            ${s.enabled ? "ON" : "OFF"}
-        </button>
-    </div>`;
-}
-
 function updateStrategies(strategies) {
-  // Dashboard grid
-  const grid = $id("strategies-grid");
-  if (grid) {
-    grid.innerHTML = strategies
-      .map((s) => _buildStrategyHTML(s, "dash"))
-      .join("");
-  }
-  // Full strategies tab grid
-  const gridFull = $id("strategies-grid-full");
-  if (gridFull) {
-    gridFull.innerHTML = strategies
-      .map((s) => _buildStrategyHTML(s, "full"))
-      .join("");
-  }
-  // Update active strategy count
+  // Update active strategy count stat card
   const activeCount = strategies.filter((s) => s.enabled).length;
   const dashActive = $id("dash-strategies-active");
   if (dashActive)
     dashActive.textContent = `${activeCount}/${strategies.length}`;
 
-  // Load trading conditions for each symbol
+  // Load trading conditions for each symbol (toggle button lives inside each card)
   loadAllTradingConditions(strategies);
 }
 
@@ -1098,7 +1139,13 @@ function drawWinLossPieChart(totalTrades, wins) {
   ctx.fillStyle = "rgba(244, 67, 54, 0.8)";
   ctx.beginPath();
   ctx.moveTo(cx, cy);
-  ctx.arc(cx, cy, radius, -Math.PI / 2 + 2 * Math.PI * winPercent, Math.PI / 2);
+  ctx.arc(
+    cx,
+    cy,
+    radius,
+    -Math.PI / 2 + 2 * Math.PI * winPercent,
+    (3 * Math.PI) / 2,
+  );
   ctx.lineTo(cx, cy);
   ctx.fill();
 
@@ -1260,6 +1307,11 @@ async function loadAllTradingConditions(strategies) {
   const container = $id("trading-conditions");
   if (!container) return;
 
+  // Build a map of enabled state per symbol
+  const enabledMap = Object.fromEntries(
+    strategies.map((s) => [s.symbol, s.enabled]),
+  );
+
   try {
     const promises = strategies.map((s) =>
       fetch(`${API_BASE}/strategies/${s.symbol}/conditions`)
@@ -1273,19 +1325,22 @@ async function loadAllTradingConditions(strategies) {
 
     const conditions = await Promise.all(promises);
     container.innerHTML = conditions
-      .map((c) => _buildConditionCard(c))
+      .map((c) => _buildConditionCard(c, enabledMap[c.symbol] ?? false))
       .join("");
   } catch (err) {
     console.error("Failed to load trading conditions:", err);
   }
 }
 
-function _buildConditionCard(cond) {
+function _buildConditionCard(cond, enabled = false) {
+  const toggleBtn = `<button class="tc-toggle ${enabled ? "on" : ""}" onclick="toggleStrategy('${cond.symbol}')" title="${enabled ? "ปิดกลยุทธ์" : "เปิดกลยุทธ์"} ${cond.symbol}">${enabled ? "ON" : "OFF"}</button>`;
+
   if (cond.status !== "ready") {
     return `
       <div class="trading-condition-card">
         <div class="tc-header">
           <span class="tc-symbol">${cond.symbol}</span>
+          ${toggleBtn}
         </div>
         <div style="font-size:11px; color:var(--text-muted)">⚠️ ${cond.message || "No data"}</div>
       </div>`;
@@ -1294,36 +1349,43 @@ function _buildConditionCard(cond) {
   const indicators = cond.technical_indicators;
   const buy = cond.buy_signal;
   const sell = cond.sell_signal;
-
   const buyTriggered = buy.triggered ? "buy" : "neutral";
   const sellTriggered = sell.triggered ? "sell" : "neutral";
+  const uid = `tc-spark-${cond.symbol}`;
 
-  return `
+  const html = `
     <div class="trading-condition-card">
       <div class="tc-header">
         <span class="tc-symbol">${cond.symbol}</span>
         <span class="tc-price">$${cond.current_price}</span>
+        ${toggleBtn}
       </div>
-      
+
+      <canvas id="${uid}" class="tc-sparkline" width="220" height="52"></canvas>
+
       <div class="tc-indicators">
         <div class="tc-ind-item">
           <div class="tc-ind-label">RSI-14</div>
-          <div class="tc-ind-value">${indicators.rsi_14.toFixed(1)}</div>
+          <div class="tc-ind-value ${indicators.rsi_14 < 35 ? "tc-val-bull" : indicators.rsi_14 > 65 ? "tc-val-bear" : ""}">${indicators.rsi_14.toFixed(1)}</div>
         </div>
         <div class="tc-ind-item">
-          <div class="tc-ind-label">MA 7 / 20</div>
+          <div class="tc-ind-label">ADX-14</div>
+          <div class="tc-ind-value ${indicators.adx_14 >= 20 ? "tc-val-bull" : "tc-val-bear"}">${(indicators.adx_14 || 0).toFixed(1)}${indicators.adx_trending === false ? " ⚠️" : ""}</div>
+        </div>
+        <div class="tc-ind-item">
+          <div class="tc-ind-label">MA ${indicators.ma_fast_period || 7} / ${indicators.ma_slow_period || 20}</div>
           <div class="tc-ind-value">${indicators.ma_7.toFixed(5)} / ${indicators.ma_20.toFixed(5)}</div>
         </div>
         <div class="tc-ind-item">
-          <div class="tc-ind-label">BB Upper</div>
+          <div class="tc-ind-label">BB ${indicators.bb_sigma || 2.0}σ Upper</div>
           <div class="tc-ind-value">${indicators.bb_upper.toFixed(5)}</div>
         </div>
         <div class="tc-ind-item">
-          <div class="tc-ind-label">BB Lower</div>
+          <div class="tc-ind-label">BB ${indicators.bb_sigma || 2.0}σ Lower</div>
           <div class="tc-ind-value">${indicators.bb_lower.toFixed(5)}</div>
         </div>
       </div>
-      
+
       <div class="tc-signals">
         <div class="tc-signal-box ${buyTriggered}">
           🟢 BUY (${buy.score})
@@ -1332,7 +1394,7 @@ function _buildConditionCard(cond) {
           🔴 SELL (${sell.score})
         </div>
       </div>
-      
+
       <div class="tc-conditions">
         <strong style="color:var(--green)">Buy:</strong>
         ${buy.conditions.map((c) => `<div>${c}</div>`).join("")}
@@ -1340,6 +1402,124 @@ function _buildConditionCard(cond) {
         ${sell.conditions.map((c) => `<div>${c}</div>`).join("")}
       </div>
     </div>`;
+
+  // Draw sparkline after DOM insert (deferred)
+  requestAnimationFrame(() => {
+    _drawSparkline(uid, cond.price_history || [], {
+      bbUpper: cond.bb_upper,
+      bbLower: cond.bb_lower,
+      maFast: cond.ma_fast,
+      isBuy: buy.triggered,
+      isSell: sell.triggered,
+    });
+  });
+
+  return html;
+}
+
+function _drawSparkline(
+  canvasId,
+  prices,
+  { bbUpper, bbLower, maFast, isBuy, isSell } = {},
+) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !prices || prices.length < 2) return;
+
+  const W = canvas.offsetWidth || canvas.width;
+  const H = canvas.height;
+  canvas.width = W;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, W, H);
+
+  const pad = { l: 0, r: 0, t: 4, b: 4 };
+  const cW = W - pad.l - pad.r;
+  const cH = H - pad.t - pad.b;
+
+  // Price range — include BB bands if available
+  const allVals = [...prices];
+  if (bbUpper) allVals.push(bbUpper);
+  if (bbLower) allVals.push(bbLower);
+  const minP = Math.min(...allVals);
+  const maxP = Math.max(...allVals);
+  const range = maxP - minP || 1;
+
+  const xOf = (i) => pad.l + (i / (prices.length - 1)) * cW;
+  const yOf = (v) => pad.t + cH - ((v - minP) / range) * cH;
+
+  // BB channel fill
+  if (bbUpper && bbLower) {
+    ctx.beginPath();
+    ctx.moveTo(pad.l, yOf(bbUpper));
+    ctx.lineTo(W - pad.r, yOf(bbUpper));
+    ctx.lineTo(W - pad.r, yOf(bbLower));
+    ctx.lineTo(pad.l, yOf(bbLower));
+    ctx.closePath();
+    ctx.fillStyle = "rgba(99,179,237,0.07)";
+    ctx.fill();
+
+    // BB upper/lower lines (dashed)
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = "rgba(99,179,237,0.35)";
+    ctx.lineWidth = 1;
+    [bbUpper, bbLower].forEach((v) => {
+      ctx.beginPath();
+      ctx.moveTo(pad.l, yOf(v));
+      ctx.lineTo(W - pad.r, yOf(v));
+      ctx.stroke();
+    });
+    ctx.setLineDash([]);
+  }
+
+  // MA fast line
+  if (maFast) {
+    const maY = yOf(maFast);
+    ctx.beginPath();
+    ctx.moveTo(pad.l, maY);
+    ctx.lineTo(W - pad.r, maY);
+    ctx.strokeStyle = "rgba(251,191,36,0.5)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // Price line gradient
+  const lineColor = isBuy ? "#22c55e" : isSell ? "#ef4444" : "#64748b";
+  const grad = ctx.createLinearGradient(0, pad.t, 0, H);
+  grad.addColorStop(
+    0,
+    isBuy
+      ? "rgba(34,197,94,0.18)"
+      : isSell
+        ? "rgba(239,68,68,0.18)"
+        : "rgba(100,116,139,0.10)",
+  );
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+
+  // Fill area under price line
+  ctx.beginPath();
+  ctx.moveTo(xOf(0), yOf(prices[0]));
+  prices.forEach((p, i) => ctx.lineTo(xOf(i), yOf(p)));
+  ctx.lineTo(xOf(prices.length - 1), H);
+  ctx.lineTo(xOf(0), H);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Price line
+  ctx.beginPath();
+  ctx.moveTo(xOf(0), yOf(prices[0]));
+  prices.forEach((p, i) => ctx.lineTo(xOf(i), yOf(p)));
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = "round";
+  ctx.stroke();
+
+  // Current price dot
+  const lastX = xOf(prices.length - 1);
+  const lastY = yOf(prices[prices.length - 1]);
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = lineColor;
+  ctx.fill();
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -1404,7 +1584,7 @@ async function updateTodayStats(positions, account) {
   // Fetch today's closed trades from API and calculate stats
   try {
     const res = await fetch(`${API_BASE}/history?days=1`);
-    const allTrades = await res.json();
+    let allTrades = await res.json();
 
     if (!Array.isArray(allTrades)) {
       allTrades = [];
@@ -1417,9 +1597,11 @@ async function updateTodayStats(positions, account) {
       1000;
     const todayEnd = todayStart + 86400; // 24 hours
 
-    const todayTrades = allTrades.filter(
-      (t) => t.time >= todayStart && t.time < todayEnd,
-    );
+    const todayTrades = allTrades.filter((t) => {
+      // Use close_time when available (trade closed today), fallback to open time
+      const tradeTime = t.close_time > 0 ? t.close_time : t.time;
+      return tradeTime >= todayStart && tradeTime < todayEnd;
+    });
 
     // Calculate today's stats
     const todayWins = todayTrades.filter((t) => t.profit > 0).length;
@@ -1429,19 +1611,11 @@ async function updateTodayStats(positions, account) {
         ? Math.round((todayWins / todayTrades.length) * 100)
         : 0;
 
-    // Add open positions P&L
-    let openPnL = 0;
-    if (positions && Array.isArray(positions)) {
-      openPnL = positions.reduce((sum, p) => sum + (p.profit || 0), 0);
-    }
-
-    const totalTodayPnL = todayPnL + openPnL;
-
-    // Update DOM
+    // Update DOM — closed trades only, consistent with History page
     const resultEl = $id("today-result");
     if (resultEl) {
-      resultEl.textContent = `${totalTodayPnL >= 0 ? "+" : ""}$${fmt(totalTodayPnL)}`;
-      resultEl.style.color = totalTodayPnL >= 0 ? "var(--green)" : "var(--red)";
+      resultEl.textContent = `${todayPnL >= 0 ? "+" : ""}$${fmt(todayPnL)}`;
+      resultEl.style.color = todayPnL >= 0 ? "var(--green)" : "var(--red)";
     }
 
     const tradesEl = $id("today-trades");
@@ -1464,7 +1638,49 @@ async function updateTodayStats(positions, account) {
    Positions Table
    ═══════════════════════════════════════════════════════════ */
 
+function getPipValue(symbol) {
+  // Try to get pip value from MT5 backend first
+  if (pipValues[symbol] !== undefined) {
+    return pipValues[symbol];
+  }
+  // Fallback to hardcoded defaults (in case API hasn't loaded yet)
+  const defaults = {
+    BTCUSD: 0.1,
+    XAUUSD: 0.01,
+    ETHUSD: 0.1,
+  };
+  return defaults[symbol] || 0.1;
+}
+
+function calculatePips(symbol, priceOpen, priceCurrent, type) {
+  const pipValue = getPipValue(symbol);
+  const priceDiff = priceCurrent - priceOpen;
+  const pips = type === "BUY" ? priceDiff / pipValue : -priceDiff / pipValue;
+  return Math.round(pips);
+}
+
+// ─── Default TP/SL Values by Symbol (Dollar Pips: 1 pip = $0.01) ──
+// e.g. 400 pips = $4.00 target profit at any symbol/lot combination
+function getDefaultTPPips(symbol) {
+  const defaults = {
+    BTCUSD: 400, // $4.00 target
+    XAUUSD: 200, // $2.00 target
+    ETHUSD: 400, // $4.00 target
+  };
+  return defaults[symbol] || 200;
+}
+
+function getDefaultSLPips(symbol) {
+  const defaults = {
+    BTCUSD: 200, // $2.00 risk
+    XAUUSD: 100, // $1.00 risk
+    ETHUSD: 200, // $2.00 risk
+  };
+  return defaults[symbol] || 100;
+}
+
 function updatePositions(positions) {
+  window._lastPositions = positions; // cache for Force toggle re-render
   const tbody = $id("positions-body");
   const noPos = $id("no-positions");
   const tbodyDash = $id("positions-body-dash");
@@ -1490,6 +1706,31 @@ function updatePositions(positions) {
       const tc = p.type === "BUY" ? "pos-buy" : "pos-sell";
       const pc = p.profit >= 0 ? "pos-pos" : "pos-neg";
       const sign = p.profit >= 0 ? "+" : "";
+
+      // Calculate pips from current price
+      const pips = calculatePips(
+        p.symbol,
+        p.price_open,
+        p.price_current,
+        p.type,
+      );
+      const pipsClass = pips >= 0 ? "pos-pos" : "pos-neg";
+
+      // Calculate pips to SL and TP — measured from open price
+      const pipValue = getPipValue(p.symbol);
+      const slPips = p.sl ? Math.round((p.sl - p.price_open) / pipValue) : null;
+      const tpPips = p.tp ? Math.round((p.tp - p.price_open) / pipValue) : null;
+
+      // For SELL positions, swap SL and TP display order
+      const slCell = p.sl
+        ? `${p.sl.toFixed(5)}<br><span style="color:var(--text-secondary);">(${slPips > 0 ? "+" : ""}${slPips} p)</span>`
+        : "—";
+      const tpCell = p.tp
+        ? `${p.tp.toFixed(5)}<br><span style="color:var(--text-secondary);">(${tpPips > 0 ? "+" : ""}${tpPips} p)</span>`
+        : "—";
+      const [firstCell, secondCell] =
+        p.type === "SELL" ? [tpCell, slCell] : [slCell, tpCell];
+
       return `
         <tr>
             <td class="pos-sym">${p.symbol}</td>
@@ -1497,22 +1738,50 @@ function updatePositions(positions) {
             <td>${p.volume}</td>
             <td>${p.price_open}</td>
             <td>${p.price_current}</td>
-            <td>${p.sl || "—"}</td>
-            <td>${p.tp || "—"}</td>
-            <td class="${pc}">${sign}$${p.profit.toFixed(2)}</td>
-            <td><button class="btn-close-pos" onclick="closePosition(${p.ticket})">Close</button><br><button style="font-size:9px; margin-top:2px; padding:3px 6px; background:#d99;" onclick="closePosition(${p.ticket}, true)">Force</button></td>
+            <td class="${pipsClass}" style="font-size:0.9rem; font-weight:600;">${sign}${pips} pips</td>
+            <td style="font-size:10px;">${firstCell}</td>
+            <td style="font-size:10px;">${secondCell}</td>
+            <td><span class="pos-pnl ${p.profit >= 0 ? "profit" : "loss"}">${sign}$${p.profit.toFixed(2)}</span></td>
+            <td>
+              <button class="btn-close-pos" onclick="closePosition(${p.ticket})">Close</button>
+              ${forceCloseEnabled ? `<button class="btn-force-pos" onclick="closePosition(${p.ticket}, true)" title="Force close — bypass strategy exit signal">⚡ Force</button>` : ""}
+            </td>
         </tr>`;
     })
     .join("");
-
   if (tbody) tbody.innerHTML = fullRows;
 
-  // Dashboard preview: 7 cols (no SL/TP)
+  // Dashboard preview with detailed pips
   const dashRows = positions
     .map((p) => {
       const tc = p.type === "BUY" ? "pos-buy" : "pos-sell";
       const pc = p.profit >= 0 ? "pos-pos" : "pos-neg";
       const sign = p.profit >= 0 ? "+" : "";
+
+      // Calculate pips from current price
+      const pips = calculatePips(
+        p.symbol,
+        p.price_open,
+        p.price_current,
+        p.type,
+      );
+      const pipsClass = pips >= 0 ? "pos-pos" : "pos-neg";
+
+      // Calculate pips to SL and TP — measured from open price
+      const pipValue = getPipValue(p.symbol);
+      const slPips = p.sl ? Math.round((p.sl - p.price_open) / pipValue) : null;
+      const tpPips = p.tp ? Math.round((p.tp - p.price_open) / pipValue) : null;
+
+      // For SELL positions, swap SL and TP display order
+      const slCell = p.sl
+        ? `${p.sl.toFixed(5)}<br><span style="color:var(--text-secondary); font-size:9px;">(${slPips > 0 ? "+" : ""}${slPips} p)</span>`
+        : "—";
+      const tpCell = p.tp
+        ? `${p.tp.toFixed(5)}<br><span style="color:var(--text-secondary); font-size:9px;">(${tpPips > 0 ? "+" : ""}${tpPips} p)</span>`
+        : "—";
+      const [firstCell, secondCell] =
+        p.type === "SELL" ? [tpCell, slCell] : [slCell, tpCell];
+
       return `
         <tr>
             <td class="pos-sym">${p.symbol}</td>
@@ -1520,13 +1789,17 @@ function updatePositions(positions) {
             <td>${p.volume}</td>
             <td>${p.price_open}</td>
             <td>${p.price_current}</td>
-            <td class="${pc}">${sign}$${p.profit.toFixed(2)}</td>
-            <td style="font-size:10px; color:var(--text-secondary)">${p.sl ? `SL: ${p.sl.toFixed(5)}<br>TP: ${p.tp?.toFixed(5) || "—"}` : "—"}</td>
-            <td><button class="btn-close-pos" onclick="closePosition(${p.ticket})">Close</button><br><button style="font-size:9px; margin-top:2px; padding:3px 6px; background:#d99;" onclick="closePosition(${p.ticket}, true)">Force</button></td>
+            <td class="${pipsClass}" style="font-size:0.9rem; font-weight:600;">${sign}${pips} pips</td>
+            <td style="font-size:10px;">${firstCell}</td>
+            <td style="font-size:10px;">${secondCell}</td>
+            <td><span class="pos-pnl ${p.profit >= 0 ? "profit" : "loss"}">${sign}$${p.profit.toFixed(2)}</span></td>
+            <td>
+              <button class="btn-close-pos" onclick="closePosition(${p.ticket})">Close</button>
+              ${forceCloseEnabled ? `<button class="btn-force-pos" onclick="closePosition(${p.ticket}, true)" title="Force close — bypass strategy exit signal">⚡ Force</button>` : ""}
+            </td>
         </tr>`;
     })
     .join("");
-
   if (tbodyDash) tbodyDash.innerHTML = dashRows;
 }
 
@@ -1539,8 +1812,18 @@ function openMT5Panel() {
   loadSavedAccounts();
 }
 function closeMT5Panel(e) {
+  // Block close when login is required (no connection yet)
+  if (_loginRequired) return;
   if (!e || e.target === $id("mt5-modal"))
     $id("mt5-modal").classList.remove("show");
+}
+function openMT5LoginPrompt() {
+  _loginRequired = true;
+  const modal = $id("mt5-modal");
+  if (modal) modal.classList.add("show", "login-required");
+  const notice = $id("mt5-login-notice");
+  if (notice) notice.style.display = "";
+  switchMT5Tab("connect");
 }
 
 // ─── Saved Accounts ──────────────────────────────────────────
@@ -1576,10 +1859,10 @@ function renderSavedAccounts(accounts) {
             <div class="sa-info" onclick="fillAccountForm(${a.login}, '${escJs(
               a.server,
             )}', '${escJs(a.name)}', ${a.auto_connect})">
-                <span class="sa-name">${a.name}</span>
-                <span class="sa-detail">${a.login || "—"} · ${
-                  a.server || "Simulation"
-                }</span>
+                <span class="sa-name">${escHtml(a.name)}</span>
+                <span class="sa-detail">${a.login || "—"} · ${escHtml(
+                  a.server || "Simulation",
+                )}</span>
                 ${
                   a.auto_connect
                     ? '<span class="sa-default-badge">★ Default</span>'
@@ -1621,9 +1904,6 @@ function fillAccountForm(login, server, name, autoConnect) {
 async function quickConnect(login, server, name) {
   // Fill form then trigger connect — password prompt if missing
   fillAccountForm(login, server, name, false);
-  const accounts = await fetch(`${API_BASE}/mt5/saved-accounts`).then((r) =>
-    r.json(),
-  );
   // password lives only on the server — call connect via API directly
   const res = await fetch(`${API_BASE}/mt5/connect`, {
     method: "POST",
@@ -1784,41 +2064,19 @@ function updateConnectionStatus(connected, simulationMode) {
     icon.textContent = "🟢";
     text.textContent = "Connected to MT5";
     if (badge) badge.style.display = "none";
+    // Auto-dismiss login modal when connection is established
+    if (_loginRequired) {
+      _loginRequired = false;
+      const modal = $id("mt5-modal");
+      if (modal) modal.classList.remove("show", "login-required");
+      const notice = $id("mt5-login-notice");
+      if (notice) notice.style.display = "none";
+    }
   } else {
     icon.textContent = "🔴";
     text.textContent = "Disconnected";
     if (badge) badge.style.display = "none";
   }
-}
-
-/* ═══════════════════════════════════════════════════════════
-   Manual Trading
-   ═══════════════════════════════════════════════════════════ */
-
-function placeOrder(side) {
-  const symbol = $id("trade-symbol").value;
-  const volume = parseFloat($id("trade-volume").value);
-  const sl = parseFloat($id("trade-sl").value) || 0;
-  const tp = parseFloat($id("trade-tp").value) || 0;
-
-  if (!volume || volume <= 0) {
-    showToast("⚠️ Invalid volume", "error");
-    return;
-  }
-
-  const price = latestPrices[symbol];
-  const priceStr = price ? ` @ ${side === "BUY" ? price.ask : price.bid}` : "";
-  if (!confirm(`Place ${side} ${volume} lots ${symbol}${priceStr}?`)) return;
-
-  sendCmd("place_order", {
-    symbol,
-    order_type: side,
-    volume,
-    sl,
-    tp,
-    comment: "Manual",
-  });
-  showToast(`📤 ${side} order sent: ${volume} ${symbol}`, "info");
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -1987,14 +2245,14 @@ async function testAIConnection() {
     resultEl.style.color = "var(--text-dim)";
   }
   try {
-    const res = await fetch(`${API_BASE}/ai/analyze/EURUSD`, {
+    const res = await fetch(`${API_BASE}/ai/analyze/BTCUSD`, {
       method: "POST",
     });
     const data = await res.json();
     if (data.signal) {
       const conf = data.confidence || 0;
       if (resultEl) {
-        resultEl.textContent = `✅ OK — EURUSD: ${data.signal} (${conf}% confidence)`;
+        resultEl.textContent = `✅ OK — BTCUSD: ${data.signal} (${conf}% confidence)`;
         resultEl.style.color = "var(--accent-green)";
       }
     } else {
@@ -2453,9 +2711,28 @@ function toggleStrategy(symbol) {
 }
 
 function closePosition(ticket, force = false) {
-  const msg = force ? "Force close (skip exit signal)?" : "Close position?";
+  if (force && !forceCloseEnabled) {
+    alert(
+      "⚠️ Force Close ถูกปิดใช้งานอยู่\nเปิดใช้งานได้ที่หน้า 'พอร์ตที่เปิดอยู่'",
+    );
+    return;
+  }
+  const msg = force ? "Force close (ข้ามสัญญาณออก)?" : "ปิดพอร์ต?";
   if (confirm(`${msg} #${ticket}?`))
     sendCmd("close_position", { ticket, force });
+}
+
+function toggleForceClose() {
+  forceCloseEnabled = !forceCloseEnabled;
+  storage_set(StorageKeys.FORCE_CLOSE_ENABLED, forceCloseEnabled);
+  // Sync both toggles (positions page + dashboard)
+  const t1 = $id("toggle-force-close");
+  const t2 = $id("toggle-force-close-dash");
+  if (t1) t1.checked = forceCloseEnabled;
+  if (t2) t2.checked = forceCloseEnabled;
+  // Re-render positions so Force button appears/disappears immediately
+  const cachedPositions = window._lastPositions;
+  if (cachedPositions) updatePositions(cachedPositions);
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -2506,7 +2783,9 @@ function showToast(msg, type = "info") {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    ["mt5-modal", "ai-settings-modal", "retrain-modal"].forEach((id) => {
+    // Don't close MT5 modal if login is required (no connection yet)
+    if (!_loginRequired) $id("mt5-modal")?.classList.remove("show");
+    ["ai-settings-modal", "retrain-modal"].forEach((id) => {
       $id(id)?.classList.remove("show");
     });
   }
@@ -2542,13 +2821,14 @@ async function fetchInitialData() {
     updateSystemButton();
     updateMT5Badge(status.mt5_connected);
     updateConnectionStatus(status.mt5_connected, status.simulation_mode);
+    // Auto-open login modal if MT5 not connected
+    if (!status.mt5_connected) openMT5LoginPrompt();
 
     updateStrategies(strategies);
     updateInsights(insights);
 
     latestPrices = prices;
     updateTickerBar(prices);
-    updateTradePriceDisplay();
   } catch (e) {
     console.error("Initial fetch failed", e);
     showToast("⚠️ Cannot connect to server", "error");
@@ -2567,3 +2847,164 @@ document.addEventListener("DOMContentLoaded", () => {
     switchTab(tab);
   });
 });
+
+/* ═══════════════════════════════════════════════════════════
+   Telegram Notifications
+   ═══════════════════════════════════════════════════════════ */
+
+async function loadTelegramSettings() {
+  try {
+    const res = await fetch(`${API_BASE}/telegram/settings`);
+    const data = await res.json();
+    _applyTelegramSettings(data);
+  } catch (e) {
+    console.error("loadTelegramSettings failed", e);
+    _showTgBanner("❌ ไม่สามารถโหลดการตั้งค่าได้", "var(--accent-red)");
+  }
+}
+
+function _applyTelegramSettings(data) {
+  const enEl = $id("tg-enabled");
+  const chatEl = $id("tg-chat-id");
+  const savedEl = $id("tg-token-saved");
+
+  if (enEl) enEl.checked = !!data.enabled;
+  if (chatEl) chatEl.value = data.chat_id || "";
+
+  // Show "token saved" indicator if a token exists on server
+  if (savedEl) savedEl.style.display = data.has_token ? "" : "none";
+  // Clear the token input (never pre-fill it for security)
+  const tokenEl = $id("tg-token");
+  if (tokenEl) tokenEl.value = "";
+
+  // Notification type checkboxes
+  const map = {
+    "tg-notify-open": "notify_open",
+    "tg-notify-close": "notify_close",
+    "tg-notify-strategy": "notify_strategy",
+    "tg-notify-risk": "notify_risk",
+  };
+  for (const [id, key] of Object.entries(map)) {
+    const el = $id(id);
+    if (el) el.checked = data[key] !== false; // default true
+  }
+
+  _updateTgEnabledLabel(!!data.enabled);
+}
+
+function _updateTgEnabledLabel(enabled) {
+  const lbl = $id("tg-enabled-label");
+  if (!lbl) return;
+  lbl.textContent = enabled ? "เปิดใช้งาน ✅" : "ปิดใช้งาน";
+  lbl.style.color = enabled ? "var(--accent-green)" : "var(--text-dim)";
+}
+
+function _showTgBanner(msg, color = "var(--accent-green)") {
+  const banner = $id("tg-status-banner");
+  const text = $id("tg-status-text");
+  if (!banner || !text) return;
+  text.textContent = msg;
+  text.style.color = color;
+  banner.style.display = "";
+  setTimeout(() => {
+    banner.style.display = "none";
+  }, 4000);
+}
+
+async function saveTelegramSettings() {
+  const tokenEl = $id("tg-token");
+  const chatEl = $id("tg-chat-id");
+  const enEl = $id("tg-enabled");
+
+  const payload = {
+    enabled: enEl?.checked ?? false,
+    chat_id: chatEl?.value.trim() || "",
+    notify_open: $id("tg-notify-open")?.checked ?? true,
+    notify_close: $id("tg-notify-close")?.checked ?? true,
+    notify_strategy: $id("tg-notify-strategy")?.checked ?? true,
+    notify_risk: $id("tg-notify-risk")?.checked ?? true,
+  };
+
+  // Only include token if user actually typed one
+  const rawToken = tokenEl?.value.trim();
+  if (rawToken) payload.bot_token = rawToken;
+
+  try {
+    const res = await fetch(`${API_BASE}/telegram/settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    _applyTelegramSettings(data);
+    _updateTgEnabledLabel(payload.enabled);
+    _showTgBanner("✅ บันทึกการตั้งค่าเรียบร้อย");
+    showToast("Telegram settings saved", "success");
+  } catch (e) {
+    _showTgBanner("❌ บันทึกไม่สำเร็จ", "var(--accent-red)");
+    showToast("Failed to save Telegram settings", "error");
+  }
+}
+
+async function testTelegram() {
+  const btn = $id("tg-test-btn");
+  const result = $id("tg-test-result");
+
+  // Save first so latest token/chat_id is used
+  await saveTelegramSettings();
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "กำลังส่ง…";
+  }
+  if (result) {
+    result.style.display = "";
+    result.textContent = "";
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/telegram/test`, { method: "POST" });
+    if (res.ok) {
+      const data = await res.json();
+      if (result) {
+        result.textContent = "✅ ส่งข้อความสำเร็จ! ตรวจสอบใน Telegram";
+        result.style.color = "var(--accent-green)";
+      }
+      showToast("✅ Telegram test sent!", "success");
+    } else {
+      const err = await res.json();
+      const msg = err.detail || "Unknown error";
+      if (result) {
+        result.textContent = `❌ ${msg}`;
+        result.style.color = "var(--accent-red)";
+      }
+      showToast(`Telegram test failed: ${msg}`, "error");
+    }
+  } catch (e) {
+    if (result) {
+      result.textContent = "❌ ไม่สามารถเชื่อมต่อ server ได้";
+      result.style.color = "var(--accent-red)";
+    }
+    showToast("Connection error", "error");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "📤 ทดสอบส่งข้อความ";
+    }
+  }
+}
+
+function toggleTgTokenVisibility() {
+  const input = $id("tg-token");
+  if (!input) return;
+  input.type = input.type === "password" ? "text" : "password";
+}
+
+function toggleTgGuide() {
+  const guide = $id("tg-guide");
+  const btn = $id("tg-guide-btn");
+  if (!guide || !btn) return;
+  const show = guide.style.display === "none";
+  guide.style.display = show ? "" : "none";
+  btn.textContent = show ? "ซ่อน" : "แสดง";
+}

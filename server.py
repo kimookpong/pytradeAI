@@ -13,10 +13,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.responses import Response
+from starlette.types import Scope, Receive, Send
 from pydantic import BaseModel
 
 from mt5_connector import MT5Connector
@@ -25,6 +27,7 @@ from smart_logic import SmartLogic
 from ai_insights import AIInsights
 from ai_engine import AIEngine
 from backtest_engine import BacktestEngine
+from telegram_notifier import TelegramNotifier
 
 
 # ─── Request Models ─────────────────────────────────────────────
@@ -74,22 +77,43 @@ class SaveAccountRequest(BaseModel):
     server: str = ""
     auto_connect: bool = False   # reconnect on startup
 
+class TelegramSettingsRequest(BaseModel):
+    bot_token: Optional[str] = None
+    chat_id: Optional[str] = None
+    enabled: Optional[bool] = None
+    notify_open: Optional[bool] = None
+    notify_close: Optional[bool] = None
+    notify_strategy: Optional[bool] = None
+    notify_risk: Optional[bool] = None
+
 
 # ─── Saved Accounts Storage ─────────────────────────────────────
-# All persistent data managed by frontend localStorage
-# Backend maintains in-memory cache only for current session
 
-# In-memory accounts storage (session-only, no file persistence)
+ACCOUNTS_FILE = Path(__file__).parent / "mt5_accounts.json"
 _saved_accounts: list[dict] = []
 
 def _load_accounts() -> list[dict]:
-    """Load accounts from in-memory storage (frontend will provide via API)."""
+    """Load saved MT5 accounts from disk."""
+    global _saved_accounts
+    try:
+        with open(ACCOUNTS_FILE, "r", encoding="utf-8") as f:
+            _saved_accounts = json.load(f)
+    except FileNotFoundError:
+        _saved_accounts = []
+    except Exception as e:
+        print(f"[server] Warning: could not load {ACCOUNTS_FILE}: {e}")
+        _saved_accounts = []
     return list(_saved_accounts)
 
 def _save_accounts(accounts: list[dict]):
-    """Save accounts to in-memory storage only (no file writes)."""
+    """Persist MT5 accounts to disk (passwords stored locally, never sent to cloud)."""
     global _saved_accounts
     _saved_accounts = list(accounts)
+    try:
+        with open(ACCOUNTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(accounts, f, indent=2)
+    except Exception as e:
+        print(f"[server] Warning: could not save {ACCOUNTS_FILE}: {e}")
 
 
 # ─── System Log ──────────────────────────────────────────────────
@@ -146,9 +170,11 @@ smart = SmartLogic(connector)
 insights = AIInsights(connector, log_callback=log_event)
 ai_engine = AIEngine(connector, log_callback=log_event)
 backtest = BacktestEngine(connector, engine)
+telegram = TelegramNotifier()
 
 # When AI is trading a symbol, skip the built-in strategy for that symbol
 engine.set_ai_mode_fn(ai_engine.is_ai_active)
+engine.set_telegram(telegram)
 
 # Connected WebSocket clients
 ws_clients: set[WebSocket] = set()
@@ -201,10 +227,25 @@ app.add_middleware(
 
 # ─── Static Files ──────────────────────────────────────────────
 
+class NoCacheStaticFiles(StaticFiles):
+    """StaticFiles that always responds with Cache-Control: no-cache so the
+    browser revalidates every request instead of serving stale JS/CSS."""
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        async def send_with_no_cache(message):
+            if message["type"] == "http.response.start":
+                headers = dict(message.get("headers", []))
+                headers[b"cache-control"] = b"no-cache, no-store, must-revalidate"
+                headers[b"pragma"] = b"no-cache"
+                headers[b"expires"] = b"0"
+                message = {**message, "headers": list(headers.items())}
+            await send(message)
+        await super().__call__(scope, receive, send_with_no_cache)
+
+
 static_dir = Path(__file__).parent / "static"
 static_dir.mkdir(exist_ok=True)
 
-app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+app.mount("/static", NoCacheStaticFiles(directory=str(static_dir)), name="static")
 
 
 @app.get("/")
@@ -250,6 +291,18 @@ async def get_status():
 async def toggle_system():
     active = engine.toggle_system()
     log_event("SYSTEM", f"System {'activated' if active else 'paused'}")
+    asyncio.create_task(telegram.notify_strategy_change(
+        f"System {'Activated ▶️' if active else 'Paused ⏸️'}",
+        "Auto-trading has been toggled via dashboard",
+    ))
+    # Broadcast to all connected WebSocket clients so every tab updates
+    dead = set()
+    for ws_client in list(ws_clients):
+        try:
+            await ws_client.send_json({"type": "system_toggle", "active": active})
+        except Exception:
+            dead.add(ws_client)
+    ws_clients -= dead
     return {"system_active": active}
 
 
@@ -258,6 +311,18 @@ async def toggle_strategy(symbol: str):
     result = engine.toggle_strategy(symbol.upper())
     state = "ON" if result.get("enabled") else "OFF"
     log_event("STRATEGY", f"{symbol.upper()} strategy turned {state}")
+    asyncio.create_task(telegram.notify_strategy_change(
+        f"{symbol.upper()} Strategy turned {state}",
+        result.get("name", ""),
+    ))
+    # Broadcast to all connected WebSocket clients
+    dead = set()
+    for ws_client in list(ws_clients):
+        try:
+            await ws_client.send_json({"type": "strategy_toggle", **result})
+        except Exception:
+            dead.add(ws_client)
+    ws_clients -= dead
     return result
 
 
@@ -289,7 +354,7 @@ async def import_test_trades():
         from mt5_connector import HistoryDeal
         
         now = int(time.time())
-        symbols = ["BTCUSD", "XAUUSD", "ETHUSD", "EURUSD", "GBPUSD"]
+        symbols = ["BTCUSD", "XAUUSD", "ETHUSD"]
         strategies = ["Strategy-A", "Strategy-B", "Strategy-C"]
         
         # Clear existing history
@@ -588,12 +653,12 @@ async def run_backtest(symbol: str = "BTCUSD", days: int = 30):
 
 
 @app.get("/api/backtest/compare")
-async def compare_backtests(symbols: str = "BTCUSD,EURUSD", days: int = 30):
+async def compare_backtests(symbols: str = "BTCUSD,XAUUSD,ETHUSD", days: int = 30):
     """
     Compare backtest performance across multiple symbols
     
     Query params:
-    - symbols: Comma-separated symbols (e.g., "BTCUSD,XAUUSD,EURUSD")
+    - symbols: Comma-separated symbols (e.g., "BTCUSD,XAUUSD,ETHUSD")
     - days: Number of days to backtest
     """
     try:
@@ -764,6 +829,15 @@ async def get_symbol_prices():
     return result
 
 
+@app.get("/api/pip-values")
+async def get_pip_values():
+    """Get pip values for all symbols from MT5 connector."""
+    result = {}
+    for symbol, config in connector.SYMBOLS.items():
+        result[symbol] = config.get("pip_value", 0.0001)
+    return result
+
+
 # ─── Manual Trading ────────────────────────────────────────────
 
 @app.post("/api/trade/place")
@@ -783,18 +857,39 @@ async def place_trade(req: PlaceOrderRequest):
               result.message)
     if not result.success:
         raise HTTPException(status_code=400, detail=result.message)
+    # Telegram notification
+    p = connector.get_symbol_price(req.symbol.upper())
+    entry = (p.get("ask") if req.order_type.upper() == "BUY" else p.get("bid")) if p else 0.0
+    asyncio.create_task(telegram.notify_order_open(
+        symbol=req.symbol.upper(), order_type=req.order_type.upper(),
+        volume=req.volume, entry=entry or 0.0,
+        sl=req.sl, tp=req.tp, ticket=result.ticket, comment=req.comment or "Manual",
+    ))
     return {"success": True, "ticket": result.ticket, "message": result.message}
 
 
 @app.post("/api/trade/close/{ticket}")
 async def close_trade(ticket: int):
     """Close a position by ticket."""
+    # Capture position details BEFORE closing for notification
+    pos = next((p for p in connector.get_positions() if p["ticket"] == ticket), None)
+
     result = connector.close_position(ticket)
     log_event("TRADE",
               f"{'✅' if result.success else '❌'} Close position #{ticket}",
               result.message)
     if not result.success:
         raise HTTPException(status_code=400, detail=result.message)
+    # Telegram notification
+    if pos:
+        p = connector.get_symbol_price(pos["symbol"])
+        close_px = (p.get("bid") if pos["type"] == "BUY" else p.get("ask")) if p else pos.get("price_current", 0.0)
+        asyncio.create_task(telegram.notify_order_close(
+            symbol=pos["symbol"], order_type=pos["type"],
+            volume=pos["volume"], entry=pos["price_open"],
+            close_price=close_px or pos.get("price_current", 0.0),
+            profit=pos["profit"], ticket=ticket, comment="Manual Close",
+        ))
     return {"success": True, "message": result.message}
 
 
@@ -894,10 +989,48 @@ async def clear_ai_thinking():
     return {"status": "cleared"}
 
 
+# ─── Telegram Notifications ────────────────────────────────────
+
+@app.get("/api/telegram/settings")
+async def get_telegram_settings():
+    """Get current Telegram notification settings (token masked)."""
+    return telegram.get_settings()
+
+
+@app.post("/api/telegram/settings")
+async def update_telegram_settings(req: TelegramSettingsRequest):
+    """Save Telegram bot token, chat ID, and notification preferences."""
+    updates = req.model_dump(exclude_none=True)
+    result = telegram.update_settings(updates)
+    log_event("SYSTEM", "Telegram settings updated")
+    return result
+
+
+@app.post("/api/telegram/test")
+async def test_telegram():
+    """Send a test message to verify the Telegram connection."""
+    ok, msg = await telegram.send_raw(
+        "✅ <b>pytradeAI</b> — การเชื่อมต่อ Telegram ทำงานปกติ!\n"
+        "🤖 ระบบพร้อมส่งการแจ้งเตือนการเทรดแล้ว"
+    )
+    if ok:
+        log_event("SYSTEM", "Telegram test message sent successfully")
+        return {"success": True, "message": "Test message sent"}
+    raise HTTPException(status_code=400, detail=f"Telegram error: {msg}")
+
+
 @app.get("/api/log")
 async def get_system_log():
     """Full system activity log (all categories)."""
     return {"log": list(_system_log)}
+
+
+@app.delete("/api/log")
+async def clear_system_log():
+    """Permanently delete all entries from the in-memory system log."""
+    _system_log.clear()
+    log_event("SYSTEM", "🗑 System log cleared by user")
+    return {"ok": True, "message": "Log cleared"}
 
 
 @app.get("/api/log/export")
@@ -999,24 +1132,44 @@ async def handle_ws_command(ws: WebSocket, msg: dict):
     elif cmd == "close_position":
         ticket = msg.get("ticket", 0)
         force = msg.get("force", False)
+        pos = next((p for p in connector.get_positions() if p["ticket"] == ticket), None)
         result = connector.close_position(ticket, force=force)
         log_event("TRADE",
                   f"{'✅' if result.success else '❌'} Close position #{ticket}" + (f" (FORCE)" if force else ""),
                   result.message)
+        if result.success and pos:
+            p = connector.get_symbol_price(pos["symbol"])
+            close_px = (p.get("bid") if pos["type"] == "BUY" else p.get("ask")) if p else pos.get("price_current", 0.0)
+            asyncio.create_task(telegram.notify_order_close(
+                symbol=pos["symbol"], order_type=pos["type"],
+                volume=pos["volume"], entry=pos["price_open"],
+                close_price=close_px or pos.get("price_current", 0.0),
+                profit=pos["profit"], ticket=ticket,
+                comment="Force Close" if force else "Manual Close",
+            ))
         await ws.send_json({"type": "close_result", "success": result.success, "message": result.message})
 
     elif cmd == "place_order":
         symbol = msg.get("symbol", "").upper()
         order_type = msg.get("order_type", "BUY").upper()
         volume = float(msg.get("volume", 0.01))
-        sl = float(msg.get("sl", 0.0))
-        tp = float(msg.get("tp", 0.0))
+        sl_pips = float(msg.get("sl", 0.0))
+        tp_pips = float(msg.get("tp", 0.0))
         comment = msg.get("comment", "Manual")
         timeframe = msg.get("timeframe", "M5")
+        # Convert dollar pips (1 pip = $0.01) to actual SL/TP price levels
+        price_data = connector.get_symbol_price(symbol)
+        entry = (price_data.get("ask") if order_type == "BUY" else price_data.get("bid")) if price_data else 0.0
+        sl, tp = connector.pips_to_sl_tp(symbol, entry, sl_pips, tp_pips, order_type, volume)
         result = connector.place_order(symbol, order_type, volume, sl, tp, comment, timeframe)
         log_event("TRADE",
                   f"{'✅' if result.success else '❌'} Manual {order_type} {volume} {symbol}",
                   result.message)
+        if result.success:
+            asyncio.create_task(telegram.notify_order_open(
+                symbol=symbol, order_type=order_type, volume=volume,
+                entry=entry or 0.0, sl=sl, tp=tp, ticket=result.ticket, comment=comment,
+            ))
         await ws.send_json({"type": "order_result", "success": result.success,
                             "ticket": result.ticket, "message": result.message})
 
@@ -1087,7 +1240,12 @@ async def broadcast_loop():
         if not ws_clients:
             continue
 
-        payload = build_realtime_payload()
+        try:
+            payload = build_realtime_payload()
+        except Exception as e:
+            print(f"\u26a0\ufe0f build_realtime_payload error: {e}")
+            continue
+
         dead = set()
         for ws in ws_clients:
             try:

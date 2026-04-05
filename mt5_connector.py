@@ -79,12 +79,9 @@ class MT5Connector:
 
     # Symbol configurations with volume limits (min/step/max lots, for MT5 compatibility)
     SYMBOLS = {
-        "BTCUSD": {"digits": 2, "base_price": 67500.0, "spread": 50.0, "pip_value": 1.0, "min_volume": 0.001, "step_volume": 0.001, "max_volume": 100.0},
-        "XAUUSD": {"digits": 2, "base_price": 2180.0, "spread": 0.30, "pip_value": 0.01, "min_volume": 0.01, "step_volume": 0.01, "max_volume": 1000.0},
-        "USDJPY": {"digits": 3, "base_price": 151.500, "spread": 0.015, "pip_value": 0.001, "min_volume": 0.01, "step_volume": 0.01, "max_volume": 1000.0},
-        "ETHUSD": {"digits": 2, "base_price": 3450.0, "spread": 15.0, "pip_value": 1.0, "min_volume": 0.1, "step_volume": 0.01, "max_volume": 1000.0},
-        "EURUSD": {"digits": 5, "base_price": 1.08500, "spread": 0.00012, "pip_value": 0.00001, "min_volume": 0.01, "step_volume": 0.01, "max_volume": 1000.0},
-        "GBPUSD": {"digits": 5, "base_price": 1.26800, "spread": 0.00015, "pip_value": 0.00001, "min_volume": 0.01, "step_volume": 0.01, "max_volume": 1000.0},
+        "BTCUSD": {"digits": 2, "base_price": 67500.0, "spread": 50.0, "pip_value": 0.1, "min_volume": 0.01, "step_volume": 0.01, "max_volume": 200.0},
+        "XAUUSD": {"digits": 2, "base_price": 2180.0, "spread": 0.30, "pip_value": 0.01, "min_volume": 0.01, "step_volume": 0.01, "max_volume": 200.0},
+        "ETHUSD": {"digits": 2, "base_price": 3450.0, "spread": 15.0, "pip_value": 0.1, "min_volume": 0.1, "step_volume": 0.1, "max_volume": 2000.0},
     }
 
     def __init__(self, log_callback=None):
@@ -99,6 +96,8 @@ class MT5Connector:
         self._log = log_callback or (lambda *a, **kw: None)
         # Maps display name (EURUSD) → broker name (EURUSDm)
         self._broker_map: dict[str, str] = {s: s for s in self.SYMBOLS}
+        # Stores per-ticket metadata for real MT5 positions (timeframe, min_profit, sl_points, sl_shifted)
+        self._mt5_position_meta: dict[int, dict] = {}
 
         # Initialize simulated prices
         for symbol, config in self.SYMBOLS.items():
@@ -258,7 +257,11 @@ class MT5Connector:
         broker_sym = self._broker_map.get(symbol, symbol)
         tick = mt5.symbol_info_tick(broker_sym)
         if tick is None:
-            self._log("ERROR", f"Failed to get price for {symbol} ({broker_sym})", detail={"symbol": symbol})
+            # Symbol may not be in Market Watch — subscribe and retry once
+            mt5.symbol_select(broker_sym, True)
+            tick = mt5.symbol_info_tick(broker_sym)
+        if tick is None:
+            self._log("ERROR", f"Failed to get price for {symbol} ({broker_sym}) — not available on broker", detail={"symbol": symbol})
             return {}
         result = {
             "symbol": symbol,
@@ -307,13 +310,8 @@ class MT5Connector:
         # Validate volume against broker limits
         validated_volume, is_valid, message = self.validate_volume(symbol, volume)
         if not is_valid:
-            error_result = TradeResult(
-                success=False,
-                message=f"Order failed: {message}",
-                data={"symbol": symbol, "order_type": order_type, "attempted_volume": volume}
-            )
             self._log("ERROR", f"Order rejected: {symbol} {order_type} volume {volume} - {message}", detail={"symbol": symbol, "type": order_type, "volume": volume, "reason": message})
-            return error_result
+            return TradeResult(success=False, message=f"Order failed: {message}")
         
         # Use validated volume
         volume = validated_volume
@@ -361,7 +359,18 @@ class MT5Connector:
             self._log("ERROR", f"Failed to get price for {symbol} ({broker_sym})", detail={"symbol": symbol})
             return error_result
 
-        filling_type = mt5.ORDER_FILLING_IOC
+        # Detect broker-supported filling mode to avoid ORDER_INVALID_FILL (error 10030)
+        filling_type = mt5.ORDER_FILLING_IOC  # default
+        sym_info = mt5.symbol_info(broker_sym)
+        if sym_info is not None:
+            filling_mode = getattr(sym_info, "filling_mode", 0)
+            # filling_mode bits: 1=FOK, 2=IOC; RETURN is always last resort
+            if filling_mode & 2:  # IOC supported
+                filling_type = mt5.ORDER_FILLING_IOC
+            elif filling_mode & 1:  # FOK supported
+                filling_type = mt5.ORDER_FILLING_FOK
+            else:
+                filling_type = mt5.ORDER_FILLING_RETURN
         if order_type.upper() == "BUY":
             action_type = mt5.ORDER_TYPE_BUY
             price = price_info.ask
@@ -387,15 +396,26 @@ class MT5Connector:
             request["tp"] = tp
 
         result = mt5.order_send(request)
+        # If filling mode was rejected, retry once with ORDER_FILLING_RETURN as fallback
+        if result is not None and result.retcode in (10030, 10014) and filling_type != mt5.ORDER_FILLING_RETURN:
+            request["type_filling"] = mt5.ORDER_FILLING_RETURN
+            result = mt5.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
             msg = result.comment if result else "Unknown error"
-            error_result = TradeResult(success=False, message=f"Order failed: {msg}")
-            self._log("ERROR", f"Order failed (MT5): {symbol} {order_type} - {msg}", detail={"symbol": symbol, "type": order_type, "volume": volume, "reason": msg})
-            return error_result
+            retcode = result.retcode if result else -1
+            self._log("ERROR", f"Order failed (MT5): {symbol} {order_type} - {msg} (retcode={retcode})", detail={"symbol": symbol, "type": order_type, "volume": volume, "reason": msg})
+            return TradeResult(success=False, message=f"Order failed: {msg} (retcode={retcode})")
 
-        success_result = TradeResult(success=True, ticket=result.order, message=f"Order executed: {order_type} {volume} {symbol}")
+        # Store metadata for strategy-aware close logic (custom fields not on MT5 position objects)
+        self._mt5_position_meta[result.order] = {
+            "timeframe": timeframe,
+            "min_profit": min_profit,
+            "sl_points": sl_points,
+            "sl_shifted": False,
+        }
+
         self._log("TRADE", f"🟢 Order placed (MT5): {order_type} {volume} {symbol} @ {price:.5f}, ticket={result.order}, SL={sl:.5f}, TP={tp:.5f}", detail={"action": "order_placed", "symbol": symbol, "type": order_type, "volume": volume, "entry": price, "ticket": result.order, "sl": sl, "tp": tp})
-        return success_result
+        return TradeResult(success=True, ticket=result.order, message=f"Order executed: {order_type} {volume} {symbol}")
 
     def close_position(self, ticket: int, force: bool = False) -> TradeResult:
         """
@@ -518,65 +538,56 @@ class MT5Connector:
         if positions and len(positions) > 0:
             position = positions[0]
         if position is None:
-            error_result = TradeResult(success=False, message=f"Position {ticket} not found")
             self._log("ERROR", f"Close failed: Position {ticket} not found (MT5)", detail={"ticket": ticket})
-            return error_result
+            return TradeResult(success=False, message=f"Position {ticket} not found")
 
-        # Check timeframe restrictions and profit trigger
-        time_elapsed = current_time - position.time
-        min_hold_seconds = 300 if position.timeframe == "M5" else 60
-        
-        # Check if profit trigger is hit (can close early if profit meets minimum)
-        can_close_by_profit = False
-        if position.min_profit > 0 and abs(position.profit) >= position.min_profit:
-            can_close_by_profit = True
-            
-            # Shift SL to lock in gains: entry ± sl_points (equal to original risk)
-            if not position.sl_shifted and position.sl_points > 0:
+        # FORCE CLOSE: skip all strategy checks
+        if not force:
+            # Retrieve stored metadata (custom fields not available on MT5 position objects)
+            meta = self._mt5_position_meta.get(ticket, {})
+            meta_timeframe = meta.get("timeframe", "M5")
+            meta_min_profit = meta.get("min_profit", 0.0)
+            meta_sl_shifted = meta.get("sl_shifted", False)
+            meta_sl_points = meta.get("sl_points", 0.0)
+
+            time_elapsed = current_time - position.time
+            min_hold_seconds = 300 if meta_timeframe == "M5" else 60
+
+            # Check if profit trigger is hit — shift SL to breakeven when triggered
+            can_close_by_profit = meta_min_profit > 0 and abs(position.profit) >= meta_min_profit
+            if can_close_by_profit and not meta_sl_shifted and meta_sl_points > 0:
                 pip_value = self.SYMBOLS.get(position.symbol, {}).get("pip_value", 0.01)
-                if position.type == 0:  # BUY: shift SL up to entry + sl_points
-                    new_sl = round(position.price_open + position.sl_points * pip_value, 5)
-                else:  # SELL: shift SL down to entry - sl_points
-                    new_sl = round(position.price_open - position.sl_points * pip_value, 5)
-                
-                # Send position modify request
+                if position.type == 0:  # BUY: move SL up to entry + sl_points
+                    new_sl = round(position.price_open + meta_sl_points * pip_value, 5)
+                else:  # SELL: move SL down to entry - sl_points
+                    new_sl = round(position.price_open - meta_sl_points * pip_value, 5)
                 broker_sym = self._broker_map.get(position.symbol, position.symbol)
-                modify_request = {
+                modify_result = mt5.order_send({
                     "action": mt5.TRADE_ACTION_SLTP,
                     "position": ticket,
                     "sl": new_sl,
                     "tp": position.tp,
-                }
-                modify_result = mt5.order_send(modify_request)
+                })
                 if modify_result and modify_result.retcode == mt5.TRADE_RETCODE_DONE:
-                    position.sl = new_sl
-                    position.sl_shifted = True
-        
-        # BEFORE 5 min: Allow close if: profit trigger
-        if time_elapsed < min_hold_seconds:
-            if not can_close_by_profit:
+                    if ticket in self._mt5_position_meta:
+                        self._mt5_position_meta[ticket]["sl_shifted"] = True
+
+            # BEFORE min_hold: allow only if profit trigger hit
+            if time_elapsed < min_hold_seconds and not can_close_by_profit:
                 remaining = min_hold_seconds - time_elapsed
-                if position.timeframe == "M5":
-                    min_profit_hint = f" | Min ${position.min_profit}" if position.min_profit > 0 else ""
-                    return TradeResult(
-                        success=False,
-                        message=f"M5: Wait for strategy signal. Lockout {remaining}s.{min_profit_hint}"
-                    )
-                else:
-                    min_profit_hint = f" | Min ${position.min_profit}" if position.min_profit > 0 else ""
-                    return TradeResult(
-                        success=False, 
-                        message=f"Cannot close yet. Wait {remaining}s (1min lockout){min_profit_hint}"
-                    )
-        
-        # AFTER 5 min: Require proper exit signal (RSI overbought/oversold + profit confirmation)
-        if time_elapsed >= min_hold_seconds:
-            exit_signal_valid = self._check_exit_signal(position)
-            if not exit_signal_valid:
+                min_profit_hint = f" | Min ${meta_min_profit}" if meta_min_profit > 0 else ""
                 return TradeResult(
                     success=False,
-                    message=f"M5: Waiting for proper exit signal (RSI/Price confirmation). Profit: {position.profit:.2f}"
+                    message=f"M5: Wait for strategy signal. Lockout {remaining:.0f}s.{min_profit_hint}"
                 )
+
+            # AFTER min_hold: require valid exit signal
+            if time_elapsed >= min_hold_seconds:
+                if not self._check_exit_signal(position):
+                    return TradeResult(
+                        success=False,
+                        message=f"M5: Waiting for exit signal (RSI/Price confirmation). Profit: {position.profit:.2f}"
+                    )
 
         close_type = mt5.ORDER_TYPE_SELL if position.type == 0 else mt5.ORDER_TYPE_BUY
         price_info = mt5.symbol_info_tick(position.symbol)
@@ -591,7 +602,7 @@ class MT5Connector:
             "price": price,
             "deviation": 20,
             "magic": 234000,
-            "comment": "Close",
+            "comment": "Force Closed" if force else "Closed",
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
@@ -601,6 +612,7 @@ class MT5Connector:
             msg = result.comment if result else "Unknown error"
             return TradeResult(success=False, message=f"Close failed: {msg}")
 
+        self._mt5_position_meta.pop(ticket, None)
         return TradeResult(success=True, ticket=ticket, message="Position closed")
 
     def get_history(self, days: int = 30) -> list[dict]:
@@ -707,6 +719,28 @@ class MT5Connector:
         
         return False
 
+    def get_candles(self, symbol: str, count: int = 50) -> list[float]:
+        """Get last `count` M5 candle closing prices for a symbol.
+
+        Returns a list of closing prices (oldest first).
+        Falls back to current bid ticks if candles unavailable.
+        """
+        if self.simulation_mode:
+            # Return current simulated price history (already collected as ticks,
+            # but for simulation purposes this is acceptable)
+            return []
+
+        broker_sym = self._broker_map.get(symbol, symbol)
+        try:
+            rates = mt5.copy_rates_from_pos(broker_sym, mt5.TIMEFRAME_M5, 0, count)
+            if rates is None or len(rates) == 0:
+                return []
+            # rates is a numpy structured array with fields: time, open, high, low, close, ...
+            return [float(r["close"]) for r in rates]
+        except Exception as e:
+            print(f"⚠️ get_candles({symbol}): {e}")
+            return []
+
     def _update_sim_prices(self):
         """Update simulated prices with realistic random walk."""
         for symbol, config in self.SYMBOLS.items():
@@ -719,33 +753,100 @@ class MT5Connector:
             self._sim_prices[symbol] = max(base * 0.95, min(base * 1.05, self._sim_prices[symbol] + change + wave * 0.1))
 
     def _update_sim_positions(self):
-        """Update P&L for simulated positions."""
+        """Update P&L for simulated positions and auto-trigger SL/TP."""
+        to_close: list[tuple] = []
+
         for p in self._positions:
-            if p.symbol in self._sim_prices:
-                current = self._sim_prices[p.symbol]
-                spread = self.SYMBOLS[p.symbol]["spread"]
-                if p.type == 0:  # BUY
-                    p.price_current = current
-                    p.profit = round((current - p.price_open) * p.volume * self._get_point_value(p.symbol), 2)
-                else:  # SELL
-                    p.price_current = current + spread
-                    p.profit = round((p.price_open - current - spread) * p.volume * self._get_point_value(p.symbol), 2)
+            if p.symbol not in self._sim_prices:
+                continue
+            current = self._sim_prices[p.symbol]
+            spread = self.SYMBOLS[p.symbol]["spread"]
+            if p.type == 0:  # BUY: close at bid
+                p.price_current = current
+                p.profit = round((current - p.price_open) * p.volume * self._get_point_value(p.symbol), 2)
+                if p.sl > 0 and current <= p.sl:
+                    to_close.append((p, "SL"))
+                elif p.tp > 0 and current >= p.tp:
+                    to_close.append((p, "TP"))
+            else:  # SELL: close at ask
+                p.price_current = round(current + spread, self.SYMBOLS[p.symbol]["digits"])
+                p.profit = round((p.price_open - p.price_current) * p.volume * self._get_point_value(p.symbol), 2)
+                if p.sl > 0 and (current + spread) >= p.sl:
+                    to_close.append((p, "SL"))
+                elif p.tp > 0 and current <= p.tp:
+                    to_close.append((p, "TP"))
+
+        # Auto-close positions that hit SL or TP
+        for p, reason in to_close:
+            if p not in self._positions:
+                continue
+            deal = HistoryDeal(
+                ticket=p.ticket,
+                symbol=p.symbol,
+                type=p.type,
+                volume=p.volume,
+                price_open=p.price_open,
+                price_close=p.price_current,
+                profit=p.profit,
+                time=p.time,
+                close_time=int(time.time()),
+                comment=reason,
+            )
+            self._history.append(deal)
+            self._account.balance += p.profit
+            self._positions.remove(p)
+            trade_type = "BUY" if p.type == 0 else "SELL"
+            self._log(
+                "TRADE",
+                f"🎯 {reason} hit (SIM): {trade_type} {p.symbol} P&L: ${p.profit:.2f}",
+                detail={"action": f"{reason.lower()}_hit", "symbol": p.symbol, "profit": p.profit, "ticket": p.ticket},
+            )
 
     def _get_point_value(self, symbol: str) -> float:
         """Get point value multiplier for P&L calculation."""
         multipliers = {
             "BTCUSD": 1.0,
             "XAUUSD": 100.0,
-            "USDJPY": 100.0 / 151.5,
             "ETHUSD": 1.0,
-            "EURUSD": 100000.0,
-            "GBPUSD": 100000.0,
         }
         return multipliers.get(symbol, 1.0)
 
+    def pips_to_sl_tp(
+        self,
+        symbol: str,
+        entry_price: float,
+        sl_pips: float,
+        tp_pips: float,
+        order_type: str,
+        lot: float,
+    ) -> tuple[float, float]:
+        """Convert dollar pips (1 pip = $0.01) to actual SL/TP price levels.
+
+        Formula:
+            dollar_amount  = pips × 0.01
+            price_distance = dollar_amount / (lot × point_value_multiplier)
+
+        Returns (sl_price, tp_price). Zeros are returned for unset values.
+        """
+        point_mult = self._get_point_value(symbol)
+        digits = self.SYMBOLS.get(symbol, {}).get("digits", 5)
+        if point_mult <= 0 or lot <= 0:
+            return 0.0, 0.0
+
+        sl_dist = (sl_pips * 0.01) / (lot * point_mult) if sl_pips > 0 else 0.0
+        tp_dist = (tp_pips * 0.01) / (lot * point_mult) if tp_pips > 0 else 0.0
+
+        is_buy = order_type.upper() == "BUY"
+        sl = round(entry_price - sl_dist, digits) if sl_pips > 0 else 0.0
+        tp = round(entry_price + tp_dist, digits) if tp_pips > 0 else 0.0
+        if not is_buy:
+            sl = round(entry_price + sl_dist, digits) if sl_pips > 0 else 0.0
+            tp = round(entry_price - tp_dist, digits) if tp_pips > 0 else 0.0
+        return sl, tp
+
     def _generate_sim_history(self):
         """Generate realistic trade history for simulation."""
-        symbols = ["BTCUSD", "XAUUSD", "USDJPY", "ETHUSD", "EURUSD"]
+        symbols = ["BTCUSD", "XAUUSD", "ETHUSD"]
         now = int(time.time())
 
         for i in range(56):
